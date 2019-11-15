@@ -70,7 +70,7 @@ Before creating enhancement suggestions, please check [this list](#before-submit
 * **Check that your issue does not already exist in the [issue tracker](https://github.com/sdispater/poetry/issues)**.
 
 
-#### How do I submit an Enhancement suggestion?
+#### How do I submit an enhancement suggestion?
 
 Enhancement suggestions are tracked on the [official issue tracker](https://github.com/sdispater/poetry/issues) where you can create a new one and provide the following information:
 
@@ -104,11 +104,20 @@ $ poetry run pytest tests/
 Poetry uses the [black](https://github.com/ambv/black) coding style and you must ensure that your
 code follows it. If not, the CI will fail and your Pull Request will not be merged.
 
-To make sure that you don't accidently commit code that does not follow the coding style, you can
+Similarly, the import statements are sorted with [isort](https://github.com/timothycrosley/isort)
+and special care must be taken to respect it. If you don't, the CI will fail as well.
+
+To make sure that you don't accidentally commit code that does not follow the coding style, you can
 install a pre-commit hook that will check that everything is in order:
 
 ```bash
 $ poetry run pre-commit install
+```
+
+You can also run it anytime using:
+
+```bash
+$ poetry run pre-commit run --all-files
 ```
 
 Your code must always be accompanied by corresponding tests, if tests are not present your code

@@ -1,3 +1,6 @@
+from poetry.utils._compat import Path
+from poetry.utils.helpers import get_cert
+from poetry.utils.helpers import get_client_cert
 from poetry.utils.helpers import get_http_basic_auth
 from poetry.utils.helpers import parse_requires
 
@@ -26,7 +29,7 @@ virtualenv>=15.2.0.0,<16.0.0.0
 pathlib2>=2.3.0.0,<3.0.0.0
 
 [:python_version >= "3.4.0.0" and python_version < "3.6.0.0"]
-zipfile36>=0.1.0.0,<0.2.0.0    
+zipfile36>=0.1.0.0,<0.2.0.0
 """
     result = parse_requires(requires)
     expected = [
@@ -52,17 +55,30 @@ zipfile36>=0.1.0.0,<0.2.0.0
 
 
 def test_get_http_basic_auth(config):
-    config.add_property("http-basic.foo.username", "foo")
-    config.add_property("http-basic.foo.password", "bar")
+    config.merge({"http-basic": {"foo": {"username": "foo", "password": "bar"}}})
 
     assert get_http_basic_auth(config, "foo") == ("foo", "bar")
 
 
 def test_get_http_basic_auth_without_password(config):
-    config.add_property("http-basic.foo.username", "foo")
+    config.merge({"http-basic": {"foo": {"username": "foo"}}})
 
     assert get_http_basic_auth(config, "foo") == ("foo", None)
 
 
 def test_get_http_basic_auth_missing(config):
     assert get_http_basic_auth(config, "foo") is None
+
+
+def test_get_cert(config):
+    ca_cert = "path/to/ca.pem"
+    config.merge({"certificates": {"foo": {"cert": ca_cert}}})
+
+    assert get_cert(config, "foo") == Path(ca_cert)
+
+
+def test_get_client_cert(config):
+    client_cert = "path/to/client.pem"
+    config.merge({"certificates": {"foo": {"client-cert": client_cert}}})
+
+    assert get_client_cert(config, "foo") == Path(client_cert)

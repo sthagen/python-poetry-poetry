@@ -1,16 +1,32 @@
+from cleo import option
+
+from poetry.utils._compat import Path
+
 from .command import Command
 
 
 class PublishCommand(Command):
-    """
-    Publishes a package to a remote repository.
 
-    publish
-        { --r|repository= : The repository to publish the package to. }
-        { --u|username= : The username to access the repository. }
-        { --p|password= : The password to access the repository. }
-        { --build : Build the package before publishing. }
-    """
+    name = "publish"
+    description = "Publishes a package to a remote repository."
+
+    options = [
+        option(
+            "repository", "r", "The repository to publish the package to.", flag=False
+        ),
+        option("username", "u", "The username to access the repository.", flag=False),
+        option("password", "p", "The password to access the repository.", flag=False),
+        option(
+            "cert", None, "Certificate authority to access the repository.", flag=False
+        ),
+        option(
+            "client-cert",
+            None,
+            "Client certificate to access the repository.",
+            flag=False,
+        ),
+        option("build", None, "Build the package before publishing."),
+    ]
 
     help = """The publish command builds and uploads the package to a remote repository.
 
@@ -21,10 +37,12 @@ The --repository option should match the name of a configured repository using
 the config command.
 """
 
+    loggers = ["poetry.masonry.publishing.publisher"]
+
     def handle(self):
         from poetry.masonry.publishing.publisher import Publisher
 
-        publisher = Publisher(self.poetry, self.output)
+        publisher = Publisher(self.poetry, self.io)
 
         # Building package first, if told
         if self.option("build"):
@@ -50,6 +68,15 @@ the config command.
 
         self.line("")
 
+        cert = Path(self.option("cert")) if self.option("cert") else None
+        client_cert = (
+            Path(self.option("client-cert")) if self.option("client-cert") else None
+        )
+
         publisher.publish(
-            self.option("repository"), self.option("username"), self.option("password")
+            self.option("repository"),
+            self.option("username"),
+            self.option("password"),
+            cert,
+            client_cert,
         )

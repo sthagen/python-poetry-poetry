@@ -1,47 +1,33 @@
 import logging
 import os
-import tarfile
-import zipfile
 
-import pkginfo
-
-from bz2 import BZ2File
 from collections import defaultdict
-from gzip import GzipFile
 from typing import Dict
 from typing import List
 from typing import Union
 
-try:
-    import urllib.parse as urlparse
-except ImportError:
-    import urlparse
-
-try:
-    from xmlrpc.client import ServerProxy
-except ImportError:
-    from xmlrpclib import ServerProxy
-
 from cachecontrol import CacheControl
 from cachecontrol.caches.file_cache import FileCache
+from cachecontrol.controller import logger as cache_control_logger
 from cachy import CacheManager
+from html5lib.html5parser import parse
 from requests import get
 from requests import session
+from requests.exceptions import TooManyRedirects
 
 from poetry.locations import CACHE_DIR
-from poetry.packages import dependency_from_pep_508
 from poetry.packages import Package
+from poetry.packages import dependency_from_pep_508
 from poetry.packages.utils.link import Link
-from poetry.semver import parse_constraint
 from poetry.semver import VersionConstraint
 from poetry.semver import VersionRange
+from poetry.semver import parse_constraint
 from poetry.semver.exceptions import ParseVersionError
 from poetry.utils._compat import Path
 from poetry.utils._compat import to_str
-from poetry.utils.helpers import parse_requires
 from poetry.utils.helpers import temporary_directory
+from poetry.utils.inspector import Inspector
 from poetry.utils.patterns import wheel_file_re
-from poetry.utils.setup_reader import SetupReader
 from poetry.version.markers import InvalidMarker
 from poetry.version.markers import parse_marker
 
@@ -49,15 +35,22 @@ from .exceptions import PackageNotFound
 from .repository import Repository
 
 
+try:
+    import urllib.parse as urlparse
+except ImportError:
+    import urlparse
+
+
+cache_control_logger.setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 
 class PyPiRepository(Repository):
 
-    CACHE_VERSION = parse_constraint("0.12.0")
+    CACHE_VERSION = parse_constraint("1.0.0b2")
 
     def __init__(self, url="https://pypi.org/", disable_cache=False, fallback=True):
-        self._name = "PyPI"
         self._url = url
         self._disable_cache = disable_cache
         self._fallback = fallback
@@ -74,11 +67,21 @@ class PyPiRepository(Repository):
             }
         )
 
-        self._session = CacheControl(
-            session(), cache=FileCache(str(release_cache_dir / "_http"))
-        )
+        self._cache_control_cache = FileCache(str(release_cache_dir / "_http"))
+        self._session = CacheControl(session(), cache=self._cache_control_cache)
+        self._inspector = Inspector()
 
         super(PyPiRepository, self).__init__()
+
+        self._name = "PyPI"
+
+    @property
+    def url(self):  # type: () -> str
+        return self._url
+
+    @property
+    def authenticated_url(self):  # type: () -> str
+        return self._url
 
     def find_packages(
         self,
@@ -105,7 +108,14 @@ class PyPiRepository(Repository):
             ):
                 allow_prereleases = True
 
-        info = self.get_package_info(name)
+        try:
+            info = self.get_package_info(name)
+        except PackageNotFound:
+            self._log(
+                "No packages found for {} {}".format(name, str(constraint)),
+                level="debug",
+            )
+            return []
 
         packages = []
 
@@ -197,7 +207,7 @@ class PyPiRepository(Repository):
             package.platform = release_info["platform"]
 
         # Adding hashes information
-        package.hashes = release_info["digests"]
+        package.files = release_info["files"]
 
         # Activate extra dependencies
         for extra in extras:
@@ -209,21 +219,35 @@ class PyPiRepository(Repository):
 
         return package
 
-    def search(self, query, mode=0):
+    def search(self, query):
         results = []
 
-        search = {"name": query}
+        search = {"q": query}
 
-        if mode == self.SEARCH_FULLTEXT:
-            search["summary"] = query
+        response = session().get(self._url + "search", params=search)
+        content = parse(response.content, namespaceHTMLElements=False)
+        for result in content.findall(".//*[@class='package-snippet']"):
+            name = result.find("h3/*[@class='package-snippet__name']").text
+            version = result.find("h3/*[@class='package-snippet__version']").text
 
-        client = ServerProxy("https://pypi.python.org/pypi")
-        hits = client.search(search, "or")
+            if not name or not version:
+                continue
 
-        for hit in hits:
-            result = Package(hit["name"], hit["version"], hit["version"])
-            result.description = to_str(hit["summary"])
-            results.append(result)
+            description = result.find("p[@class='package-snippet__description']").text
+            if not description:
+                description = ""
+
+            try:
+                result = Package(name, version, description)
+                result.description = to_str(description.strip())
+                results.append(result)
+            except ParseVersionError:
+                self._log(
+                    'Unable to parse version "{}" for the {} package, skipping'.format(
+                        version, name
+                    ),
+                    level="debug",
+                )
 
         return results
 
@@ -290,7 +314,7 @@ class PyPiRepository(Repository):
             "platform": info["platform"],
             "requires_dist": info["requires_dist"],
             "requires_python": info["requires_python"],
-            "digests": [],
+            "files": [],
             "_cache_version": str(self.CACHE_VERSION),
         }
 
@@ -300,7 +324,12 @@ class PyPiRepository(Repository):
             version_info = []
 
         for file_info in version_info:
-            data["digests"].append(file_info["digests"]["sha256"])
+            data["files"].append(
+                {
+                    "file": file_info["filename"],
+                    "hash": "sha256:" + file_info["digests"]["sha256"],
+                }
+            )
 
         if self._fallback and data["requires_dist"] is None:
             self._log("No dependencies found, downloading archives", level="debug")
@@ -331,7 +360,14 @@ class PyPiRepository(Repository):
         return data
 
     def _get(self, endpoint):  # type: (str) -> Union[dict, None]
-        json_response = self._session.get(self._url + endpoint)
+        try:
+            json_response = self._session.get(self._url + endpoint)
+        except TooManyRedirects:
+            # Cache control redirect loop.
+            # We try to remove the cache and try again
+            self._cache_control_cache.delete(self._url + endpoint)
+            json_response = self._session.get(self._url + endpoint)
+
         if json_response.status_code == 404:
             return None
 
@@ -440,30 +476,14 @@ class PyPiRepository(Repository):
             "Downloading wheel: {}".format(urlparse.urlparse(url).path.rsplit("/")[-1]),
             level="debug",
         )
-        info = {"summary": "", "requires_python": None, "requires_dist": None}
 
         filename = os.path.basename(urlparse.urlparse(url).path.rsplit("/")[-1])
 
         with temporary_directory() as temp_dir:
-            filepath = os.path.join(temp_dir, filename)
-            self._download(url, filepath)
+            filepath = Path(temp_dir) / filename
+            self._download(url, str(filepath))
 
-            try:
-                meta = pkginfo.Wheel(filepath)
-            except ValueError:
-                # Unable to determine dependencies
-                # Assume none
-                return info
-
-        if meta.summary:
-            info["summary"] = meta.summary or ""
-
-        info["requires_python"] = meta.requires_python
-
-        if meta.requires_dist:
-            info["requires_dist"] = meta.requires_dist
-
-        return info
+            return self._inspector.inspect_wheel(filepath)
 
     def _get_info_from_sdist(
         self, url
@@ -472,7 +492,6 @@ class PyPiRepository(Repository):
             "Downloading sdist: {}".format(urlparse.urlparse(url).path.rsplit("/")[-1]),
             level="debug",
         )
-        info = {"summary": "", "requires_python": None, "requires_dist": None}
 
         filename = os.path.basename(urlparse.urlparse(url).path)
 
@@ -480,120 +499,7 @@ class PyPiRepository(Repository):
             filepath = Path(temp_dir) / filename
             self._download(url, str(filepath))
 
-            try:
-                meta = pkginfo.SDist(str(filepath))
-                if meta.summary:
-                    info["summary"] = meta.summary
-
-                if meta.requires_python:
-                    info["requires_python"] = meta.requires_python
-
-                if meta.requires_dist:
-                    info["requires_dist"] = list(meta.requires_dist)
-
-                    return info
-            except ValueError:
-                # Unable to determine dependencies
-                # We pass and go deeper
-                pass
-
-            # Still not dependencies found
-            # So, we unpack and introspect
-            suffix = filepath.suffix
-            gz = None
-            if suffix == ".zip":
-                tar = zipfile.ZipFile(str(filepath))
-            else:
-                if suffix == ".bz2":
-                    gz = BZ2File(str(filepath))
-                    suffixes = filepath.suffixes
-                    if len(suffixes) > 1 and suffixes[-2] == ".tar":
-                        suffix = ".tar.bz2"
-                else:
-                    gz = GzipFile(str(filepath))
-                    suffix = ".tar.gz"
-
-                tar = tarfile.TarFile(str(filepath), fileobj=gz)
-
-            try:
-                tar.extractall(os.path.join(temp_dir, "unpacked"))
-            finally:
-                if gz:
-                    gz.close()
-
-                tar.close()
-
-            unpacked = Path(temp_dir) / "unpacked"
-            sdist_dir = unpacked / Path(filename).name.rstrip(suffix)
-
-            # Checking for .egg-info at root
-            eggs = list(sdist_dir.glob("*.egg-info"))
-            if eggs:
-                egg_info = eggs[0]
-
-                requires = egg_info / "requires.txt"
-                if requires.exists():
-                    with requires.open(encoding="utf-8") as f:
-                        info["requires_dist"] = parse_requires(f.read())
-
-                        return info
-
-            # Searching for .egg-info in sub directories
-            eggs = list(sdist_dir.glob("**/*.egg-info"))
-            if eggs:
-                egg_info = eggs[0]
-
-                requires = egg_info / "requires.txt"
-                if requires.exists():
-                    with requires.open(encoding="utf-8") as f:
-                        info["requires_dist"] = parse_requires(f.read())
-
-                        return info
-
-            # Still nothing, try reading (without executing it)
-            # the setup.py file.
-            try:
-                setup_info = self._inspect_sdist_with_setup(sdist_dir)
-
-                for key, value in info.items():
-                    if value:
-                        continue
-
-                    info[key] = setup_info[key]
-
-                return info
-            except Exception as e:
-                self._log(
-                    "An error occurred when reading setup.py or setup.cfg: {}".format(
-                        str(e)
-                    ),
-                    "warning",
-                )
-                return info
-
-    def _inspect_sdist_with_setup(self, sdist_dir):
-        info = {"requires_python": None, "requires_dist": None}
-
-        result = SetupReader.read_from_directory(sdist_dir)
-        requires = ""
-        for dep in result["install_requires"]:
-            requires += dep + "\n"
-
-        if result["extras_require"]:
-            requires += "\n"
-
-        for extra_name, deps in result["extras_require"].items():
-            requires += "[{}]\n".format(extra_name)
-
-            for dep in deps:
-                requires += dep + "\n"
-
-            requires += "\n"
-
-        info["requires_dist"] = parse_requires(requires)
-        info["requires_python"] = result["python_requires"]
-
-        return info
+            return self._inspector.inspect_sdist(filepath)
 
     def _download(self, url, dest):  # type: (str, str) -> None
         r = get(url, stream=True)

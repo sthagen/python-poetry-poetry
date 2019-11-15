@@ -1,9 +1,13 @@
-from poetry.locations import CONFIG_DIR
-from poetry.utils._compat import Path
+import logging
+
+from poetry.utils.helpers import get_cert
+from poetry.utils.helpers import get_client_cert
 from poetry.utils.helpers import get_http_basic_auth
-from poetry.utils.toml_file import TomlFile
 
 from .uploader import Uploader
+
+
+logger = logging.getLogger(__name__)
 
 
 class Publisher:
@@ -21,20 +25,20 @@ class Publisher:
     def files(self):
         return self._uploader.files
 
-    def publish(self, repository_name, username, password):
+    def publish(self, repository_name, username, password, cert=None, client_cert=None):
         if repository_name:
-            self._io.writeln(
-                "Publishing <info>{}</info> (<comment>{}</comment>) "
-                "to <fg=cyan>{}</>".format(
+            self._io.write_line(
+                "Publishing <c1>{}</c1> (<b>{}</b>) "
+                "to <info>{}</info>".format(
                     self._package.pretty_name,
                     self._package.pretty_version,
                     repository_name,
                 )
             )
         else:
-            self._io.writeln(
-                "Publishing <info>{}</info> (<comment>{}</comment>) "
-                "to <fg=cyan>PyPI</>".format(
+            self._io.write_line(
+                "Publishing <c1>{}</c1> (<b>{}</b>) "
+                "to <info>PyPI</info>".format(
                     self._package.pretty_name, self._package.pretty_version
                 )
             )
@@ -44,41 +48,49 @@ class Publisher:
             repository_name = "pypi"
         else:
             # Retrieving config information
-            config_file = TomlFile(Path(CONFIG_DIR) / "config.toml")
-
-            if not config_file.exists():
-                raise RuntimeError(
-                    "Config file does not exist. "
-                    "Unable to get repository information"
-                )
-
-            config = config_file.read()
-
-            if (
-                "repositories" not in config
-                or repository_name not in config["repositories"]
-            ):
+            repository = self._poetry.config.get(
+                "repositories.{}".format(repository_name)
+            )
+            if repository is None:
                 raise RuntimeError(
                     "Repository {} is not defined".format(repository_name)
                 )
 
-            url = config["repositories"][repository_name]["url"]
+            url = repository["url"]
 
         if not (username and password):
-            auth = get_http_basic_auth(self._poetry.auth_config, repository_name)
-            if auth:
-                username = auth[0]
-                password = auth[1]
+            # Check if we have a token first
+            token = self._poetry.config.get("pypi-token.{}".format(repository_name))
+            if token:
+                logger.debug("Found an API token for {}.".format(repository_name))
+                username = "__token__"
+                password = token
+            else:
+                auth = get_http_basic_auth(self._poetry.config, repository_name)
+                if auth:
+                    logger.debug(
+                        "Found authentication information for {}.".format(
+                            repository_name
+                        )
+                    )
+                    username = auth[0]
+                    password = auth[1]
 
-        # Requesting missing credentials
-        if not username:
-            username = self._io.ask("Username:")
+        resolved_client_cert = client_cert or get_client_cert(
+            self._poetry.config, repository_name
+        )
+        # Requesting missing credentials but only if there is not a client cert defined.
+        if not resolved_client_cert:
+            if username is None:
+                username = self._io.ask("Username:")
 
-        if password is None:
-            password = self._io.ask_hidden("Password:")
-
-        # TODO: handle certificates
+            if password is None:
+                password = self._io.ask_hidden("Password:")
 
         self._uploader.auth(username, password)
 
-        return self._uploader.upload(url)
+        return self._uploader.upload(
+            url,
+            cert=cert or get_cert(self._poetry.config, repository_name),
+            client_cert=resolved_client_cert,
+        )

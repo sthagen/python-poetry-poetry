@@ -1,3 +1,5 @@
+from typing import List
+
 from poetry.utils._compat import Path
 from poetry.utils.helpers import module_name
 
@@ -58,8 +60,17 @@ class Module:
                     )
 
         for package in packages:
+            formats = package.get("format")
+            if formats and not isinstance(formats, list):
+                formats = [formats]
+
             self._includes.append(
-                PackageInclude(self._path, package["include"], package.get("from"))
+                PackageInclude(
+                    self._path,
+                    package["include"],
+                    formats=formats,
+                    source=package.get("from"),
+                )
             )
 
         for include in includes:

@@ -1,10 +1,12 @@
+from typing import Optional
+
 import poetry.packages
 
-from poetry.semver import parse_constraint
 from poetry.semver import Version
 from poetry.semver import VersionConstraint
 from poetry.semver import VersionRange
 from poetry.semver import VersionUnion
+from poetry.semver import parse_constraint
 from poetry.utils.helpers import canonicalize_name
 from poetry.version.markers import AnyMarker
 from poetry.version.markers import parse_marker
@@ -13,6 +15,7 @@ from .constraints import parse_constraint as parse_generic_constraint
 from .constraints.constraint import Constraint
 from .constraints.multi_constraint import MultiConstraint
 from .constraints.union_constraint import UnionConstraint
+from .utils.utils import convert_markers
 
 
 class Dependency(object):
@@ -23,6 +26,7 @@ class Dependency(object):
         optional=False,  # type: bool
         category="main",  # type: str
         allows_prereleases=False,  # type: bool
+        source_name=None,  # type: Optional[str]
     ):
         self._name = canonicalize_name(name)
         self._pretty_name = name
@@ -45,6 +49,7 @@ class Dependency(object):
             )
 
         self._allows_prereleases = allows_prereleases
+        self._source_name = source_name
 
         self._python_versions = "*"
         self._python_constraint = parse_constraint("*")
@@ -78,6 +83,10 @@ class Dependency(object):
     @property
     def category(self):
         return self._category
+
+    @property
+    def source_name(self):
+        return self._source_name
 
     @property
     def python_versions(self):
@@ -135,9 +144,10 @@ class Dependency(object):
             requirement += "[{}]".format(",".join(self.extras))
 
         if isinstance(self.constraint, VersionUnion):
-            requirement += " ({})".format(
-                ",".join([str(c).replace(" ", "") for c in self.constraint.ranges])
-            )
+            if self.constraint.excludes_single_version():
+                requirement += " ({})".format(str(self.constraint))
+            else:
+                requirement += " ({})".format(self.pretty_constraint)
         elif isinstance(self.constraint, Version):
             requirement += " (=={})".format(self.constraint.text)
         elif not self.constraint.is_any():
@@ -163,6 +173,9 @@ class Dependency(object):
     def is_directory(self):
         return False
 
+    def is_url(self):
+        return False
+
     def accepts(self, package):  # type: (poetry.packages.Package) -> bool
         """
         Determines if the given package matches this dependency.
@@ -177,6 +190,7 @@ class Dependency(object):
         requirement = self.base_pep_508_name
 
         markers = []
+        has_extras = False
         if not self.marker.is_any():
             marker = self.marker
             if not with_extras:
@@ -184,6 +198,8 @@ class Dependency(object):
 
             if not marker.is_empty():
                 markers.append(str(marker))
+
+            has_extras = "extra" in convert_markers(marker)
         else:
             # Python marker
             if self.python_versions != "*":
@@ -194,12 +210,15 @@ class Dependency(object):
                 )
 
         in_extras = " || ".join(self._in_extras)
-        if in_extras and with_extras:
+        if in_extras and with_extras and not has_extras:
             markers.append(
                 self._create_nested_marker("extra", parse_generic_constraint(in_extras))
             )
 
         if markers:
+            if self.is_vcs():
+                requirement += " "
+
             if len(markers) > 1:
                 markers = ["({})".format(m) for m in markers]
                 requirement += "; {}".format(" and ".join(markers))

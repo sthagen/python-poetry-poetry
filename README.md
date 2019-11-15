@@ -7,8 +7,7 @@ ensuring you have the right stack everywhere.
 
 It supports Python 2.7 and 3.4+.
 
-[![Unix Build Status](https://img.shields.io/travis/sdispater/poetry.svg?label=Unix)](https://travis-ci.org/sdispater/poetry)
-[![Windows Build Status](https://img.shields.io/appveyor/ci/sdispater/poetry.svg?label=Windows)](https://ci.appveyor.com/project/sdispater/poetry)
+![Tests Status](https://github.com/sdispater/poetry/workflows/Tests/badge.svg)
 
 ## Installation
 
@@ -82,13 +81,16 @@ poetry completions fish > ~/.config/fish/completions/poetry.fish
 
 # Zsh
 poetry completions zsh > ~/.zfunc/_poetry
+
+# Zsh (macOS/Homebrew)
+poetry completions zsh > $(brew --prefix)/share/zsh/site-functions/_poetry
 ```
 
 *Note:* you may need to restart your shell in order for the changes to take
 effect.
 
 For `zsh`, you must then add the following line in your `~/.zshrc` before
-`compinit`:
+`compinit` (not for homebrew setup):
 
 ```zsh
 fpath+=~/.zfunc
@@ -127,7 +129,7 @@ toml = "^0.9"
 # Dependencies with extras
 requests = { version = "^2.13", extras = [ "security" ] }
 # Python specific dependencies with prereleases allowed
-pathlib2 = { version = "^2.2", python = "~2.7", allows-prereleases = true }
+pathlib2 = { version = "^2.2", python = "~2.7", allow-prereleases = true }
 # Git dependencies
 cleo = { git = "https://github.com/sdispater/cleo.git", branch = "master" }
 
@@ -245,9 +247,9 @@ can lead to compatibility issues.
 Also, you have to explicitly tell it to not update the locked packages when you
 install new ones. This should be the default.
 
-#### Remove command
+#### Uninstall command
 
-The `remove` command will only remove the package specified but not its dependencies
+The `uninstall` command will only remove the package specified but not its dependencies
 if they are no longer needed.
 
 You either have to use `sync` or `clean` to fix that.
@@ -333,16 +335,35 @@ poetry install --no-dev
 ```
 
 You can also specify the extras you want installed
-by passing the `--E|--extras` option (See [Extras](#extras) for more info)
+by passing the `-E|--extras` option (See [Extras](#extras) for more info)
 
 ```bash
 poetry install --extras "mysql pgsql"
 poetry install -E mysql -E pgsql
 ```
 
+By default `poetry` will install your project's package everytime you run `install`:
+
+```bash
+$ poetry install
+Installing dependencies from lock file
+
+Nothing to install or update
+
+  - Installing <your-package-name> (x.x.x)
+
+```
+
+If you want to skip this installation, use the `--no-root` option.
+
+```bash
+poetry install --no-root
+```
+
 #### Options
 
 * `--no-dev`: Do not install dev dependencies.
+* `--no-root`: Do not install the root package (your project).
 * `-E|--extras`: Features to install (multiple values allowed).
 
 ### update
@@ -524,6 +545,21 @@ This command locks (without installing) the dependencies specified in `pyproject
 poetry lock
 ```
 
+### export
+
+This command exports the lock file to other formats.
+
+```bash
+poetry export -f requirements.txt > requirements.txt
+```
+
+#### Options
+
+* `--format (-f)`: the format to export to.  Currently, only
+  `requirements.txt` is supported.
+* `--output (-o)`: the name of the output file.  If omitted, print to standard
+  output.
+
 
 ## The `pyproject.toml` file
 
@@ -554,14 +590,14 @@ The recommended notation for the most common licenses is (alphabetical):
 * BSD-2-Clause
 * BSD-3-Clause
 * BSD-4-Clause
-* GPL-2.0
-* GPL-2.0+
-* GPL-3.0
-* GPL-3.0+
-* LGPL-2.1
-* LGPL-2.1+
-* LGPL-3.0
-* LGPL-3.0+
+* GPL-2.0-only
+* GPL-2.0-or-later
+* GPL-3.0-only
+* GPL-3.0-or-later
+* LGPL-2.1-only
+* LGPL-2.1-or-later
+* LGPL-3.0-only
+* LGPL-3.0-or-later
 * MIT
 
 Optional, but it is highly recommended to supply this.

@@ -12,6 +12,7 @@ from .locker import Locker
 from .package import Package
 from .package_collection import PackageCollection
 from .project_package import ProjectPackage
+from .url_dependency import URLDependency
 from .utils.link import Link
 from .utils.utils import convert_markers
 from .utils.utils import group_markers

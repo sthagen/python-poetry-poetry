@@ -1,42 +1,48 @@
 import glob
 import logging
 import os
-import pkginfo
 import re
 import time
 
-from cleo import ProgressIndicator
 from contextlib import contextmanager
 from tempfile import mkdtemp
 from typing import List
+from typing import Optional
 
+import pkginfo
+
+from clikit.ui.components import ProgressIndicator
+
+from poetry.factory import Factory
+from poetry.mixology.incompatibility import Incompatibility
+from poetry.mixology.incompatibility_cause import DependencyCause
+from poetry.mixology.incompatibility_cause import PythonCause
+from poetry.mixology.term import Term
 from poetry.packages import Dependency
 from poetry.packages import DependencyPackage
 from poetry.packages import DirectoryDependency
 from poetry.packages import FileDependency
 from poetry.packages import Package
 from poetry.packages import PackageCollection
+from poetry.packages import URLDependency
 from poetry.packages import VCSDependency
 from poetry.packages import dependency_from_pep_508
-
-from poetry.mixology.incompatibility import Incompatibility
-from poetry.mixology.incompatibility_cause import DependencyCause
-from poetry.mixology.incompatibility_cause import PythonCause
-from poetry.mixology.term import Term
-
 from poetry.repositories import Pool
-
 from poetry.utils._compat import PY35
-from poetry.utils._compat import Path
 from poetry.utils._compat import OrderedDict
+from poetry.utils._compat import Path
+from poetry.utils._compat import urlparse
+from poetry.utils.env import EnvCommandError
+from poetry.utils.env import EnvManager
+from poetry.utils.env import VirtualEnv
 from poetry.utils.helpers import parse_requires
 from poetry.utils.helpers import safe_rmtree
-from poetry.utils.env import Env
-from poetry.utils.env import EnvCommandError
+from poetry.utils.helpers import temporary_directory
+from poetry.utils.inspector import Inspector
 from poetry.utils.setup_reader import SetupReader
-
-from poetry.version.markers import MarkerUnion
+from poetry.utils.toml_file import TomlFile
 from poetry.vcs.git import Git
+from poetry.version.markers import MarkerUnion
 
 from .exceptions import CompatibilityError
 
@@ -45,20 +51,8 @@ logger = logging.getLogger(__name__)
 
 
 class Indicator(ProgressIndicator):
-    def __init__(self, output):
-        super(Indicator, self).__init__(output)
-
-        self.format = "%message% <fg=black;options=bold>(%elapsed:2s%)</>"
-
-    @contextmanager
-    def auto(self):
-        message = "<info>Resolving dependencies</info>..."
-
-        with super(Indicator, self).auto(message, message):
-            yield
-
     def _formatter_elapsed(self):
-        elapsed = time.time() - self.start_time
+        elapsed = time.time() - self._start_time
 
         return "{:.1f}s".format(elapsed)
 
@@ -67,10 +61,13 @@ class Provider:
 
     UNSAFE_PACKAGES = {"setuptools", "distribute", "pip"}
 
-    def __init__(self, package, pool, io):  # type: (Package, Pool, ...) -> None
+    def __init__(
+        self, package, pool, io  # type: Package  # type: Pool
+    ):  # type: (...) -> None
         self._package = package
         self._pool = pool
         self._io = io
+        self._inspector = Inspector()
         self._python_constraint = package.python_constraint
         self._search_for = {}
         self._is_debugging = self._io.is_debug() or self._io.is_very_verbose()
@@ -135,6 +132,8 @@ class Provider:
             packages = self.search_for_file(dependency)
         elif dependency.is_directory():
             packages = self.search_for_directory(dependency)
+        elif dependency.is_url():
+            packages = self.search_for_url(dependency)
         else:
             constraint = dependency.constraint
 
@@ -143,6 +142,7 @@ class Provider:
                 constraint,
                 extras=dependency.extras,
                 allow_prereleases=dependency.allows_prereleases(),
+                repository=dependency.source_name,
             )
 
             packages.sort(
@@ -164,76 +164,12 @@ class Provider:
         Basically, we clone the repository in a temporary directory
         and get the information we need by checking out the specified reference.
         """
-        if dependency.vcs != "git":
-            raise ValueError("Unsupported VCS dependency {}".format(dependency.vcs))
-
-        tmp_dir = Path(mkdtemp(prefix="pypoetry-git-{}".format(dependency.name)))
-
-        try:
-            git = Git()
-            git.clone(dependency.source, tmp_dir)
-            git.checkout(dependency.reference, tmp_dir)
-            revision = git.rev_parse(dependency.reference, tmp_dir).strip()
-
-            if dependency.tag or dependency.rev:
-                revision = dependency.reference
-
-            directory_dependency = DirectoryDependency(
-                dependency.name,
-                tmp_dir,
-                category=dependency.category,
-                optional=dependency.is_optional(),
-            )
-            for extra in dependency.extras:
-                directory_dependency.extras.append(extra)
-
-            package = self.search_for_directory(directory_dependency)[0]
-
-            package.source_type = "git"
-            package.source_url = dependency.source
-            package.source_reference = revision
-        except Exception:
-            raise
-        finally:
-            safe_rmtree(str(tmp_dir))
-
-        return [package]
-
-    def search_for_file(self, dependency):  # type: (FileDependency) -> List[Package]
-        if dependency.path.suffix == ".whl":
-            meta = pkginfo.Wheel(str(dependency.full_path))
-        else:
-            # Assume sdist
-            meta = pkginfo.SDist(str(dependency.full_path))
-
-        if dependency.name != meta.name:
-            # For now, the dependency's name must match the actual package's name
-            raise RuntimeError(
-                "The dependency name for {} does not match the actual package's name: {}".format(
-                    dependency.name, meta.name
-                )
-            )
-
-        package = Package(meta.name, meta.version)
-        package.source_type = "file"
-        package.source_url = dependency.path.as_posix()
-
-        package.description = meta.summary
-        for req in meta.requires_dist:
-            dep = dependency_from_pep_508(req)
-            for extra in dep.in_extras:
-                if extra not in package.extras:
-                    package.extras[extra] = []
-
-                package.extras[extra].append(dep)
-
-            if not dep.is_optional():
-                package.requires.append(dep)
-
-        if meta.requires_python:
-            package.python_versions = meta.requires_python
-
-        package.hashes = [dependency.hash()]
+        package = self.get_package_from_vcs(
+            dependency.vcs,
+            dependency.source,
+            dependency.reference,
+            name=dependency.name,
+        )
 
         for extra in dependency.extras:
             if extra in package.extras:
@@ -244,13 +180,129 @@ class Provider:
 
         return [package]
 
+    @classmethod
+    def get_package_from_vcs(
+        cls, vcs, url, reference=None, name=None
+    ):  # type: (str, str, Optional[str], Optional[str]) -> Package
+        if vcs != "git":
+            raise ValueError("Unsupported VCS dependency {}".format(vcs))
+
+        tmp_dir = Path(
+            mkdtemp(prefix="pypoetry-git-{}".format(url.split("/")[-1].rstrip(".git")))
+        )
+
+        try:
+            git = Git()
+            git.clone(url, tmp_dir)
+            if reference is not None:
+                git.checkout(reference, tmp_dir)
+            else:
+                reference = "HEAD"
+
+            revision = git.rev_parse(reference, tmp_dir).strip()
+
+            package = cls.get_package_from_directory(tmp_dir, name=name)
+
+            package.source_type = "git"
+            package.source_url = url
+            package.source_reference = revision
+        except Exception:
+            raise
+        finally:
+            safe_rmtree(str(tmp_dir))
+
+        return package
+
+    def search_for_file(self, dependency):  # type: (FileDependency) -> List[Package]
+        package = self.get_package_from_file(dependency.full_path)
+
+        if dependency.name != package.name:
+            # For now, the dependency's name must match the actual package's name
+            raise RuntimeError(
+                "The dependency name for {} does not match the actual package's name: {}".format(
+                    dependency.name, package.name
+                )
+            )
+
+        package.source_url = dependency.path.as_posix()
+        package.files = [
+            {"file": dependency.path.name, "hash": "sha256:" + dependency.hash()}
+        ]
+
+        for extra in dependency.extras:
+            if extra in package.extras:
+                for dep in package.extras[extra]:
+                    dep.activate()
+
+                package.requires += package.extras[extra]
+
+        return [package]
+
+    @classmethod
+    def get_package_from_file(cls, file_path):  # type: (Path) -> Package
+        info = Inspector().inspect(file_path)
+        if not info["name"]:
+            raise RuntimeError(
+                "Unable to determine the package name of {}".format(file_path)
+            )
+
+        package = Package(info["name"], info["version"])
+        package.source_type = "file"
+        package.source_url = file_path.as_posix()
+
+        package.description = info["summary"]
+        for req in info["requires_dist"]:
+            dep = dependency_from_pep_508(req)
+            for extra in dep.in_extras:
+                if extra not in package.extras:
+                    package.extras[extra] = []
+
+                package.extras[extra].append(dep)
+
+            if not dep.is_optional():
+                package.requires.append(dep)
+
+        if info["requires_python"]:
+            package.python_versions = info["requires_python"]
+
+        return package
+
     def search_for_directory(
         self, dependency
     ):  # type: (DirectoryDependency) -> List[Package]
-        if dependency.supports_poetry():
-            from poetry.poetry import Poetry
+        package = self.get_package_from_directory(
+            dependency.full_path, name=dependency.name
+        )
 
-            poetry = Poetry.create(dependency.full_path)
+        package.source_url = dependency.path.as_posix()
+
+        if dependency.base is not None:
+            package.root_dir = dependency.base.as_posix()
+
+        for extra in dependency.extras:
+            if extra in package.extras:
+                for dep in package.extras[extra]:
+                    dep.activate()
+
+                package.requires += package.extras[extra]
+
+        return [package]
+
+    @classmethod
+    def get_package_from_directory(
+        cls, directory, name=None
+    ):  # type: (Path, Optional[str]) -> Package
+        supports_poetry = False
+        pyproject = directory.joinpath("pyproject.toml")
+        if pyproject.exists():
+            pyproject = TomlFile(pyproject)
+            pyproject_content = pyproject.read()
+            supports_poetry = (
+                "tool" in pyproject_content and "poetry" in pyproject_content["tool"]
+            )
+
+        if supports_poetry:
+            poetry = Factory().create_poetry(directory)
 
             pkg = poetry.package
             package = Package(pkg.name, pkg.version)
@@ -270,25 +322,26 @@ class Provider:
         else:
             # Execute egg_info
             current_dir = os.getcwd()
-            os.chdir(str(dependency.full_path))
+            os.chdir(str(directory))
 
             try:
-                cwd = dependency.full_path
-                venv = Env.get(cwd)
-                venv.run("python", "setup.py", "egg_info")
+                with temporary_directory() as tmp_dir:
+                    EnvManager.build_venv(tmp_dir)
+                    venv = VirtualEnv(Path(tmp_dir), Path(tmp_dir))
+                    venv.run("python", "setup.py", "egg_info")
             except EnvCommandError:
-                result = SetupReader.read_from_directory(dependency.full_path)
+                result = SetupReader.read_from_directory(directory)
                 if not result["name"]:
                     # The name could not be determined
                     # We use the dependency name
-                    result["name"] = dependency.name
+                    result["name"] = name
 
                 if not result["version"]:
                     # The version could not be determined
                     # so we raise an error since it is mandatory
                     raise RuntimeError(
                         "Unable to retrieve the package version for {}".format(
-                            dependency.path
+                            directory
                         )
                     )
 
@@ -327,12 +380,12 @@ class Provider:
                     egg_info = next(
                         Path(p)
                         for p in glob.glob(
-                            os.path.join(str(dependency.full_path), "**", "*.egg-info"),
+                            os.path.join(str(directory), "**", "*.egg-info"),
                             recursive=True,
                         )
                     )
                 else:
-                    egg_info = next(dependency.full_path.glob("**/*.egg-info"))
+                    egg_info = next(directory.glob("**/*.egg-info"))
 
                 meta = pkginfo.UnpackedSDist(str(egg_info))
                 package_name = meta.name
@@ -352,15 +405,6 @@ class Provider:
                 os.chdir(current_dir)
 
             package = Package(package_name, package_version)
-
-            if dependency.name != package.name:
-                # For now, the dependency's name must match the actual package's name
-                raise RuntimeError(
-                    "The dependency name for {} does not match the actual package's name: {}".format(
-                        dependency.name, package.name
-                    )
-                )
-
             package.description = package_summary
 
             for req in reqs:
@@ -378,8 +422,29 @@ class Provider:
             if python_requires:
                 package.python_versions = python_requires
 
+        if name and name != package.name:
+            # For now, the dependency's name must match the actual package's name
+            raise RuntimeError(
+                "The dependency name for {} does not match the actual package's name: {}".format(
+                    name, package.name
+                )
+            )
+
         package.source_type = "directory"
-        package.source_url = dependency.path.as_posix()
+        package.source_url = directory.as_posix()
+
+        return package
+
+    def search_for_url(self, dependency):  # type: (URLDependency) -> List[Package]
+        package = self.get_package_from_url(dependency.url)
+
+        if dependency.name != package.name:
+            # For now, the dependency's name must match the actual package's name
+            raise RuntimeError(
+                "The dependency name for {} does not match the actual package's name: {}".format(
+                    dependency.name, package.name
+                )
+            )
 
         for extra in dependency.extras:
             if extra in package.extras:
@@ -389,6 +454,20 @@ class Provider:
                 package.requires += package.extras[extra]
 
         return [package]
+
+    @classmethod
+    def get_package_from_url(cls, url):  # type: (str) -> Package
+        with temporary_directory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            file_name = os.path.basename(urlparse.urlparse(url).path)
+            Inspector().download(url, temp_dir / file_name)
+
+            package = cls.get_package_from_file(temp_dir / file_name)
+
+        package.source_type = "url"
+        package.source_url = url
+
+        return package
 
     def incompatibilities_for(
         self, package
@@ -453,22 +532,29 @@ class Provider:
     ):  # type: (DependencyPackage) -> DependencyPackage
         if package.is_root():
             package = package.clone()
-
-        if not package.is_root() and package.source_type not in {
+            requires = package.all_requires
+        elif not package.is_root() and package.source_type not in {
             "directory",
             "file",
+            "url",
             "git",
         }:
             package = DependencyPackage(
                 package.dependency,
                 self._pool.package(
-                    package.name, package.version.text, extras=package.requires_extras
+                    package.name,
+                    package.version.text,
+                    extras=package.requires_extras,
+                    repository=package.dependency.source_name,
                 ),
             )
+            requires = package.requires
+        else:
+            requires = package.requires
 
         dependencies = [
             r
-            for r in package.requires
+            for r in requires
             if self._package.python_constraint.allows_any(r.python_constraint)
         ]
 
@@ -518,7 +604,7 @@ class Provider:
                 new_markers = []
                 for dep in _deps:
                     marker = dep.marker.without_extras()
-                    if marker.is_empty():
+                    if marker.is_any():
                         # No marker or only extras
                         continue
 
@@ -610,14 +696,8 @@ class Provider:
 
         return package
 
-    # UI
-
-    @property
-    def output(self):
-        return self._io
-
     def debug(self, message, depth=0):
-        if not (self.output.is_very_verbose() or self.output.is_debug()):
+        if not (self._io.is_very_verbose() or self._io.is_debug()):
             return
 
         if message.startswith("fact:"):
@@ -626,44 +706,42 @@ class Provider:
                 m2 = re.match(r"(.+?) \((.+?)\)", m.group(1))
                 if m2:
                     name = m2.group(1)
-                    version = " (<comment>{}</comment>)".format(m2.group(2))
+                    version = " (<b>{}</b>)".format(m2.group(2))
                 else:
                     name = m.group(1)
                     version = ""
 
                 message = (
-                    "<fg=blue>fact</>: <info>{}</info>{} "
-                    "depends on <info>{}</info> (<comment>{}</comment>)".format(
+                    "<fg=blue>fact</>: <c1>{}</c1>{} "
+                    "depends on <c1>{}</c1> (<b>{}</b>)".format(
                         name, version, m.group(2), m.group(3)
                     )
                 )
             elif " is " in message:
                 message = re.sub(
                     "fact: (.+) is (.+)",
-                    "<fg=blue>fact</>: <info>\\1</info> is <comment>\\2</comment>",
+                    "<fg=blue>fact</>: <c1>\\1</c1> is <b>\\2</b>",
                     message,
                 )
             else:
                 message = re.sub(
-                    r"(?<=: )(.+?) \((.+?)\)",
-                    "<info>\\1</info> (<comment>\\2</comment>)",
-                    message,
+                    r"(?<=: )(.+?) \((.+?)\)", "<c1>\\1</c1> (<b>\\2</b>)", message
                 )
                 message = "<fg=blue>fact</>: {}".format(message.split("fact: ")[1])
         elif message.startswith("selecting "):
             message = re.sub(
                 r"selecting (.+?) \((.+?)\)",
-                "<fg=blue>selecting</> <info>\\1</info> (<comment>\\2</comment>)",
+                "<fg=blue>selecting</> <c1>\\1</c1> (<b>\\2</b>)",
                 message,
             )
         elif message.startswith("derived:"):
             m = re.match(r"derived: (.+?) \((.+?)\)$", message)
             if m:
-                message = "<fg=blue>derived</>: <info>{}</info> (<comment>{}</comment>)".format(
+                message = "<fg=blue>derived</>: <c1>{}</c1> (<b>{}</b>)".format(
                     m.group(1), m.group(2)
                 )
             else:
-                message = "<fg=blue>derived</>: <info>{}</info>".format(
+                message = "<fg=blue>derived</>: <c1>{}</c1>".format(
                     message.split("derived: ")[1]
                 )
         elif message.startswith("conflict:"):
@@ -672,14 +750,14 @@ class Provider:
                 m2 = re.match(r"(.+?) \((.+?)\)", m.group(1))
                 if m2:
                     name = m2.group(1)
-                    version = " (<comment>{}</comment>)".format(m2.group(2))
+                    version = " (<b>{}</b>)".format(m2.group(2))
                 else:
                     name = m.group(1)
                     version = ""
 
                 message = (
-                    "<fg=red;options=bold>conflict</>: <info>{}</info>{} "
-                    "depends on <info>{}</info> (<comment>{}</comment>)".format(
+                    "<fg=red;options=bold>conflict</>: <c1>{}</c1>{} "
+                    "depends on <c1>{}</c1> (<b>{}</b>)".format(
                         name, version, m.group(2), m.group(3)
                     )
                 )
@@ -702,17 +780,22 @@ class Provider:
                 + "\n"
             )
 
-            self.output.write(debug_info)
+            self._io.write(debug_info)
 
     @contextmanager
     def progress(self):
-        if not self._io.is_decorated() or self.is_debugging():
-            self.output.writeln("Resolving dependencies...")
+        if not self._io.output.supports_ansi() or self.is_debugging():
+            self._io.write_line("Resolving dependencies...")
             yield
         else:
-            indicator = Indicator(self._io)
+            indicator = Indicator(
+                self._io, "{message} <fg=black;options=bold>({elapsed:2s})</>"
+            )
 
-            with indicator.auto():
+            with indicator.auto(
+                "<info>Resolving dependencies...</info>",
+                "<info>Resolving dependencies...</info>",
+            ):
                 yield
 
         self._in_progress = False

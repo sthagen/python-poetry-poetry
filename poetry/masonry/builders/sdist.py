@@ -16,13 +16,12 @@ from poetry.utils._compat import to_str
 
 from ..utils.helpers import normalize_file_permissions
 from ..utils.package_include import PackageInclude
-
 from .builder import Builder
 
 
 SETUP = """\
 # -*- coding: utf-8 -*-
-from distutils.core import setup
+from setuptools import setup
 
 {before}
 setup_kwargs = {{
@@ -32,6 +31,8 @@ setup_kwargs = {{
     'long_description': {long_description!r},
     'author': {author!r},
     'author_email': {author_email!r},
+    'maintainer': {maintainer!r},
+    'maintainer_email': {maintainer_email!r},
     'url': {url!r},
     {extra}
 }}
@@ -42,8 +43,11 @@ setup(**setup_kwargs)
 
 
 class SdistBuilder(Builder):
+
+    format = "sdist"
+
     def build(self, target_dir=None):  # type: (Path) -> Path
-        self._io.writeln(" - Building <info>sdist</info>")
+        self._io.write_line(" - Building <info>sdist</info>")
         if target_dir is None:
             target_dir = self._path / "dist"
 
@@ -90,7 +94,7 @@ class SdistBuilder(Builder):
             tar.close()
             gz.close()
 
-        self._io.writeln(" - Built <fg=cyan>{}</>".format(target.name))
+        self._io.write_line(" - Built <comment>{}</comment>".format(target.name))
 
         return target
 
@@ -109,6 +113,9 @@ class SdistBuilder(Builder):
         packages = []
         package_data = {}
         for include in self._module.includes:
+            if include.formats and "sdist" not in include.formats:
+                continue
+
             if isinstance(include, PackageInclude):
                 if include.is_package():
                     pkg_dir, _packages, _package_data = self.find_packages(include)
@@ -119,10 +126,10 @@ class SdistBuilder(Builder):
                     packages += [p for p in _packages if p not in packages]
                     package_data.update(_package_data)
                 else:
+                    module = include.elements[0].relative_to(include.base).stem
+
                     if include.source is not None:
                         package_dir[""] = str(include.base.relative_to(self._path))
-
-                    module = include.elements[0].relative_to(include.base).stem
 
                     if module not in modules:
                         modules.append(module)
@@ -177,6 +184,8 @@ class SdistBuilder(Builder):
                 long_description=to_str(self._meta.description),
                 author=to_str(self._meta.author),
                 author_email=to_str(self._meta.author_email),
+                maintainer=to_str(self._meta.maintainer),
+                maintainer_email=to_str(self._meta.maintainer_email),
                 url=to_str(self._meta.home_page),
                 extra="\n    ".join(extra),
                 after="\n".join(after),
@@ -217,7 +226,6 @@ class SdistBuilder(Builder):
             # Relative to the top-level package
             return pkg_name, Path(rel_path).as_posix()
 
-        excluded_files = self.find_excluded_files()
         for path, dirnames, filenames in os.walk(str(base), topdown=True):
             if os.path.basename(path) == "__pycache__":
                 continue
@@ -259,9 +267,7 @@ class SdistBuilder(Builder):
         return pkgdir, sorted(packages), pkg_data
 
     @classmethod
-    def convert_dependencies(
-        cls, package, dependencies  # type: Package  # type: List[Dependency]
-    ):
+    def convert_dependencies(cls, package, dependencies):
         main = []
         extras = defaultdict(list)
         req_regex = re.compile(r"^(.+) \((.+)\)$")

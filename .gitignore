@@ -2,7 +2,9 @@
 
 # Packages
 *.egg
-*.egg-info
+!/tests/**/*.egg
+/*.egg-info
+/tests/fixtures/**/*.egg-info
 /dist/*
 build
 _build
@@ -36,3 +38,4 @@ MANIFEST.in
 .venv
 /releases/*
 pip-wheel-metadata
+/poetry.toml

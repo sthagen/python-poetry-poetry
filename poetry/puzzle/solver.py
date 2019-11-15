@@ -13,12 +13,10 @@ from poetry.version.markers import AnyMarker
 
 from .exceptions import CompatibilityError
 from .exceptions import SolverProblemError
-
 from .operations import Install
 from .operations import Uninstall
 from .operations import Update
 from .operations.operation import Operation
-
 from .provider import Provider
 
 
@@ -58,12 +56,20 @@ class Solver:
                     installed = True
 
                     if pkg.source_type == "git" and package.source_type == "git":
+                        from poetry.vcs.git import Git
+
                         # Trying to find the currently installed version
+                        pkg_source_url = Git.normalize_url(pkg.source_url)
+                        package_source_url = Git.normalize_url(package.source_url)
                         for locked in self._locked.packages:
+                            if locked.name != pkg.name or locked.source_type != "git":
+                                continue
+
+                            locked_source_url = Git.normalize_url(locked.source_url)
                             if (
                                 locked.name == pkg.name
                                 and locked.source_type == pkg.source_type
-                                and locked.source_url == pkg.source_url
+                                and locked_source_url == pkg_source_url
                                 and locked.source_reference == pkg.source_reference
                             ):
                                 pkg = Package(pkg.name, locked.version)
@@ -72,9 +78,11 @@ class Solver:
                                 pkg.source_reference = locked.source_reference
                                 break
 
-                        if (
-                            pkg.source_url != package.source_url
-                            or pkg.source_reference != package.source_reference
+                        if pkg_source_url != package_source_url or (
+                            pkg.source_reference != package.source_reference
+                            and not pkg.source_reference.startswith(
+                                package.source_reference
+                            )
                         ):
                             operations.append(Update(pkg, package))
                         else:
@@ -83,6 +91,8 @@ class Solver:
                             )
                     elif package.version != pkg.version:
                         # Checking version
+                        operations.append(Update(pkg, package))
+                    elif package.source_type != pkg.source_type:
                         operations.append(Update(pkg, package))
                     else:
                         operations.append(Install(package).skip("Already installed"))
@@ -182,6 +192,7 @@ class Solver:
         graph = self._build_graph(self._package, packages)
 
         depths = []
+        final_packages = []
         for package in packages:
             category, optional, marker, depth = self._get_tags_for_package(
                 package, graph
@@ -189,14 +200,17 @@ class Solver:
 
             if marker is None:
                 marker = AnyMarker()
+            if marker.is_empty():
+                continue
 
             package.category = category
             package.optional = optional
             package.marker = marker
 
             depths.append(depth)
+            final_packages.append(package)
 
-        return packages, depths
+        return final_packages, depths
 
     def _build_graph(
         self, package, packages, previous=None, previous_dep=None, dep=None
@@ -208,17 +222,22 @@ class Solver:
         else:
             category = dep.category
             optional = dep.is_optional() and not dep.is_activated()
-            intersection = previous["marker"].intersect(previous_dep.marker)
-            intersection = intersection.intersect(package.marker)
+            intersection = (
+                previous["marker"]
+                .without_extras()
+                .intersect(previous_dep.marker.without_extras())
+            )
+            intersection = intersection.intersect(package.marker.without_extras())
 
             marker = intersection
 
+        childrens = []  # type: List[Dict[str, Any]]
         graph = {
             "name": package.name,
             "category": category,
             "optional": optional,
             "marker": marker,
-            "children": [],  # type: List[Dict[str, Any]]
+            "children": childrens,
         }
 
         if previous_dep and previous_dep is not dep and previous_dep.name == dep.name:
@@ -260,7 +279,7 @@ class Solver:
                     # If there is already a child with this name
                     # we merge the requirements
                     existing = None
-                    for child in graph["children"]:
+                    for child in childrens:
                         if (
                             child["name"] == pkg.name
                             and child["category"] == dependency.category
@@ -281,7 +300,7 @@ class Solver:
                         )
                         continue
 
-                    graph["children"].append(child_graph)
+                    childrens.append(child_graph)
 
         return graph
 
