@@ -96,7 +96,12 @@ class PipInstaller(BaseInstaller):
 
             self.run(*args)
 
-    def update(self, _, target):
+    def update(self, package, target):
+        if package.source_type != target.source_type:
+            # If the source type has changed, we remove the current
+            # package to avoid perpetual updates in some cases
+            self.remove(package)
+
         self.install(target, update=True)
 
     def remove(self, package):
@@ -115,7 +120,7 @@ class PipInstaller(BaseInstaller):
             raise
 
     def run(self, *args, **kwargs):  # type: (...) -> str
-        return self._env.run("python", "-m", "pip", *args, **kwargs)
+        return self._env.run_pip(*args, **kwargs)
 
     def requirement(self, package, formatted=False):
         if formatted and not package.source_type:

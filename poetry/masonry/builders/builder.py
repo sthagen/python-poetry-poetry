@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
 import re
 import shutil
 import tempfile
@@ -12,7 +11,6 @@ from typing import Union
 from clikit.api.io.flags import VERY_VERBOSE
 
 from poetry.utils._compat import Path
-from poetry.utils._compat import basestring
 from poetry.utils._compat import glob
 from poetry.utils._compat import lru_cache
 from poetry.utils._compat import to_str
@@ -34,7 +32,6 @@ Summary: {summary}
 
 
 class Builder(object):
-
     AVAILABLE_PYTHONS = {"2", "2.7", "3", "3.4", "3.5", "3.6", "3.7"}
 
     format = None
@@ -86,8 +83,9 @@ class Builder(object):
 
         explicitely_excluded = set()
         for excluded_glob in self._package.exclude:
+
             for excluded in glob(
-                os.path.join(self._path.as_posix(), str(excluded_glob)), recursive=True
+                Path(self._path, excluded_glob).as_posix(), recursive=True
             ):
                 explicitely_excluded.add(
                     Path(excluded).relative_to(self._path).as_posix()
@@ -104,10 +102,18 @@ class Builder(object):
         return result
 
     def is_excluded(self, filepath):  # type: (Union[str, Path]) -> bool
-        if not isinstance(filepath, basestring):
-            filepath = filepath.as_posix()
+        exclude_path = Path(filepath)
 
-        return filepath in self.find_excluded_files()
+        while True:
+            if exclude_path.as_posix() in self.find_excluded_files():
+                return True
+
+            if len(exclude_path.parts) > 1:
+                exclude_path = exclude_path.parent
+            else:
+                break
+
+        return False
 
     def find_files_to_add(self, exclude_build=True):  # type: (bool) -> list
         """
@@ -156,7 +162,7 @@ class Builder(object):
             )
             to_add.append(license_file.relative_to(self._path))
 
-        # If a README is specificed we need to include it
+        # If a README is specified we need to include it
         # to avoid errors
         if "readme" in self._poetry.local_config:
             readme = self._path / self._poetry.local_config["readme"]
