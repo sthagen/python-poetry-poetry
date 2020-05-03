@@ -28,7 +28,7 @@ curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poet
 !!! note
 
     You only need to install Poetry once. It will automatically pick up the current
-    Python version and use it to [create virtualenvs](/docs/basic-usage/#poetry-and-virtualenvs) accordingly.
+    Python version and use it to [create virtualenvs](/docs/managing-environments.md) accordingly.
 
 The installer installs the `poetry` tool to Poetry's `bin` directory.
 On Unix it is located at `$HOME/.poetry/bin` and on Windows at `%USERPROFILE%\.poetry\bin`.
@@ -168,7 +168,7 @@ poetry completions bash > $(brew --prefix)/etc/bash_completion.d/poetry.bash-com
 poetry completions fish > ~/.config/fish/completions/poetry.fish
 
 # Fish (Homebrew)
-poetry completions fish > $(brew --prefix)/share/fish/vendor_completions.d/poetry.fish
+poetry completions fish > (brew --prefix)/share/fish/vendor_completions.d/poetry.fish
 
 # Zsh
 poetry completions zsh > ~/.zfunc/_poetry
