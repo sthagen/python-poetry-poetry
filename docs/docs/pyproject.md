@@ -38,7 +38,7 @@ The recommended notation for the most common licenses is (alphabetical):
 * MIT
 
 Optional, but it is highly recommended to supply this.
-More identifiers are listed at the [SPDX Open Source License Registry](https://www.spdx.org/licenses/).
+More identifiers are listed at the [SPDX Open Source License Registry](https://spdx.org/licenses/).
 
 !!!note
 
@@ -113,7 +113,7 @@ packages = [
 ]
 ```
 
-If your package is stored inside a "source" directory, you must specify it:
+If your package is stored inside a "lib" directory, you must specify it:
 
 ```toml
 [tool.poetry]
@@ -216,6 +216,10 @@ poetry = 'poetry.console:run'
 
 Here, we will have the `poetry` script installed which will execute `console.run` in the `poetry` package.
 
+!!!note
+
+    When a script is added or updated, run `poetry install` to make them available in the project's virtualenv.
+
 ## `extras`
 
 Poetry supports extras to allow expression of:
@@ -278,16 +282,22 @@ If you publish you package on PyPI, they will appear in the `Project Links` sect
 [PEP-517](https://www.python.org/dev/peps/pep-0517/) introduces a standard way
 to define alternative build systems to build a Python project.
 
-Poetry is compliant with PEP-517 so if you use Poetry to manage your Python
-project you should reference it in the `build-system` section of the `pyproject.toml`
-file like so:
+Poetry is compliant with PEP-517, by providing a lightweight core library,
+so if you use Poetry to manage your Python project you should reference
+it in the `build-system` section of the `pyproject.toml` file like so:
 
 ```toml
 [build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry_core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
 ```
 
 !!!note
 
     When using the `new` or `init` command this section will be automatically added.
+
+
+!!!note
+
+    If your `pyproject.toml` file still references `poetry` directly as a build backend,
+    you should update it to reference `poetry_core` instead.
