@@ -1,6 +1,7 @@
 import hashlib
 import io
 
+from pathlib import Path
 from typing import Any
 from typing import Dict
 from typing import List
@@ -21,7 +22,6 @@ from poetry.__version__ import __version__
 from poetry.core.masonry.metadata import Metadata
 from poetry.core.masonry.utils.helpers import escape_name
 from poetry.core.masonry.utils.helpers import escape_version
-from poetry.utils._compat import Path
 from poetry.utils.helpers import normalize_version
 from poetry.utils.patterns import wheel_file_re
 
@@ -265,13 +265,24 @@ class Uploader:
                         allow_redirects=False,
                         headers={"Content-Type": monitor.content_type},
                     )
-                if dry_run or resp.ok:
+                if dry_run or 200 <= resp.status_code < 300:
                     bar.set_format(
                         " - Uploading <c1>{0}</c1> <fg=green>%percent%%</>".format(
                             file.name
                         )
                     )
                     bar.finish()
+                elif resp.status_code == 301:
+                    if self._io.output.supports_ansi():
+                        self._io.overwrite(
+                            " - Uploading <c1>{0}</c1> <error>{1}</>".format(
+                                file.name, "FAILED"
+                            )
+                        )
+                    raise UploadError(
+                        "Redirects are not supported. "
+                        "Is the URL missing a trailing slash?"
+                    )
             except (requests.ConnectionError, requests.HTTPError) as e:
                 if self._io.output.supports_ansi():
                     self._io.overwrite(

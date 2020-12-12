@@ -1,22 +1,18 @@
 import os
 import tempfile
+import urllib.parse
 
 from subprocess import CalledProcessError
 
 from clikit.api.io import IO
 
+from poetry.core.pyproject.toml import PyProjectTOML
 from poetry.repositories.pool import Pool
 from poetry.utils._compat import encode
 from poetry.utils.env import Env
 from poetry.utils.helpers import safe_rmtree
 
 from .base_installer import BaseInstaller
-
-
-try:
-    import urllib.parse as urlparse
-except ImportError:
-    import urlparse
 
 
 class PipInstaller(BaseInstaller):
@@ -43,7 +39,7 @@ class PipInstaller(BaseInstaller):
             and package.source_url
         ):
             repository = self._pool.repository(package.source_reference)
-            parsed = urlparse.urlparse(package.source_url)
+            parsed = urllib.parse.urlparse(package.source_url)
             if parsed.scheme == "http":
                 self._io.error(
                     "    <warning>Installing from unsecure host: {}</warning>".format(
@@ -112,7 +108,9 @@ class PipInstaller(BaseInstaller):
             raise
 
         # This is a workaround for https://github.com/pypa/pip/issues/4176
-        nspkg_pth_file = self._env.site_packages / "{}-nspkg.pth".format(package.name)
+        nspkg_pth_file = self._env.site_packages.path / "{}-nspkg.pth".format(
+            package.name
+        )
         if nspkg_pth_file.exists():
             nspkg_pth_file.unlink()
 
@@ -181,8 +179,6 @@ class PipInstaller(BaseInstaller):
     def install_directory(self, package):
         from poetry.factory import Factory
         from poetry.io.null_io import NullIO
-        from poetry.masonry.builders.editable import EditableBuilder
-        from poetry.utils.toml_file import TomlFile
 
         if package.root_dir:
             req = (package.root_dir / package.source_url).as_posix()
@@ -191,37 +187,29 @@ class PipInstaller(BaseInstaller):
 
         args = ["install", "--no-deps", "-U"]
 
-        pyproject = TomlFile(os.path.join(req, "pyproject.toml"))
+        pyproject = PyProjectTOML(os.path.join(req, "pyproject.toml"))
 
-        has_poetry = False
-        has_build_system = False
-        if pyproject.exists():
-            pyproject_content = pyproject.read()
-            has_poetry = (
-                "tool" in pyproject_content and "poetry" in pyproject_content["tool"]
-            )
+        if pyproject.is_poetry_project():
             # Even if there is a build system specified
             # some versions of pip (< 19.0.0) don't understand it
             # so we need to check the version of pip to know
             # if we can rely on the build system
-            pip_version = self._env.pip_version
-            pip_version_with_build_system_support = pip_version.__class__(19, 0, 0)
-            has_build_system = (
-                "build-system" in pyproject_content
-                and pip_version >= pip_version_with_build_system_support
+            legacy_pip = self._env.pip_version < self._env.pip_version.__class__(
+                19, 0, 0
             )
+            package_poetry = Factory().create_poetry(pyproject.file.path.parent)
 
-        if has_poetry:
-            package_poetry = Factory().create_poetry(pyproject.parent)
             if package.develop and not package_poetry.package.build_script:
+                from poetry.masonry.builders.editable import EditableBuilder
+
                 # This is a Poetry package in editable mode
                 # we can use the EditableBuilder without going through pip
                 # to install it, unless it has a build script.
                 builder = EditableBuilder(package_poetry, self._env, NullIO())
                 builder.build()
 
-                return
-            elif not has_build_system or package_poetry.package.build_script:
+                return 0
+            elif legacy_pip or package_poetry.package.build_script:
                 from poetry.core.masonry.builders.sdist import SdistBuilder
 
                 # We need to rely on creating a temporary setup.py
@@ -261,8 +249,8 @@ class PipInstaller(BaseInstaller):
 
         # Now we just need to install from the source directory
         pkg = Package(package.name, package.version)
-        pkg.source_type = "directory"
-        pkg.source_url = str(src_dir)
+        pkg._source_type = "directory"
+        pkg._source_url = str(src_dir)
         pkg.develop = package.develop
 
         self.install_directory(pkg)

@@ -56,12 +56,13 @@ class Application(BaseApplication):
                 "See <fg=blue>https://python-poetry.org/docs/managing-environments/</> "
                 "for more information."
             ).format(python_version, poetry_feature_release, python_version)
-            self._preliminary_io.write_line("<fg=yellow>{}</>\n".format(message))
+            self._preliminary_io.error_line("<fg=yellow>{}</>\n".format(message))
 
     @property
     def poetry(self):
+        from pathlib import Path
+
         from poetry.factory import Factory
-        from poetry.utils._compat import Path
 
         if self._poetry is not None:
             return self._poetry

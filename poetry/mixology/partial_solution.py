@@ -1,4 +1,3 @@
-from collections import OrderedDict
 from typing import Dict
 from typing import List
 
@@ -26,13 +25,13 @@ class PartialSolution:
         self._assignments = []  # type: List[Assignment]
 
         # The decisions made for each package.
-        self._decisions = OrderedDict()  # type: Dict[str, Package]
+        self._decisions = dict()  # type: Dict[str, Package]
 
         # The intersection of all positive Assignments for each package, minus any
         # negative Assignments that refer to that package.
         #
         # This is derived from self._assignments.
-        self._positive = OrderedDict()  # type: Dict[str, Term]
+        self._positive = dict()  # type: Dict[str, Term]
 
         # The union of all negative Assignments for each package.
         #
@@ -40,7 +39,7 @@ class PartialSolution:
         # map.
         #
         # This is derived from self._assignments.
-        self._negative = OrderedDict()  # type: Dict[str, Dict[str, Term]]
+        self._negative = dict()  # type: Dict[str, Dict[str, Term]]
 
         # The number of distinct solutions that have been attempted so far.
         self._attempted_solutions = 1
@@ -65,7 +64,7 @@ class PartialSolution:
         return [
             term.dependency
             for term in self._positive.values()
-            if term.dependency.name not in self._decisions
+            if term.dependency.complete_name not in self._decisions
         ]
 
     def decide(self, package):  # type: (Package) -> None
@@ -81,7 +80,7 @@ class PartialSolution:
             self._attempted_solutions += 1
 
         self._backtracking = False
-        self._decisions[package.name] = package
+        self._decisions[package.complete_name] = package
 
         self._assign(
             Assignment.decision(package, self.decision_level, len(self._assignments))
@@ -120,9 +119,9 @@ class PartialSolution:
         packages = set()
         while self._assignments[-1].decision_level > decision_level:
             removed = self._assignments.pop(-1)
-            packages.add(removed.dependency.name)
+            packages.add(removed.dependency.complete_name)
             if removed.is_decision():
-                del self._decisions[removed.dependency.name]
+                del self._decisions[removed.dependency.complete_name]
 
         # Re-compute _positive and _negative for the packages that were removed.
         for package in packages:
@@ -133,21 +132,21 @@ class PartialSolution:
                 del self._negative[package]
 
         for assignment in self._assignments:
-            if assignment.dependency.name in packages:
+            if assignment.dependency.complete_name in packages:
                 self._register(assignment)
 
     def _register(self, assignment):  # type: (Assignment) -> None
         """
         Registers an Assignment in _positive or _negative.
         """
-        name = assignment.dependency.name
+        name = assignment.dependency.complete_name
         old_positive = self._positive.get(name)
         if old_positive is not None:
             self._positive[name] = old_positive.intersect(assignment)
 
             return
 
-        ref = assignment.dependency.name
+        ref = assignment.dependency.complete_name
         negative_by_ref = self._negative.get(name)
         old_negative = None if negative_by_ref is None else negative_by_ref.get(ref)
         if old_negative is None:
@@ -174,12 +173,12 @@ class PartialSolution:
         assigned_term = None  # type: Term
 
         for assignment in self._assignments:
-            if assignment.dependency.name != term.dependency.name:
+            if assignment.dependency.complete_name != term.dependency.complete_name:
                 continue
 
             if (
                 not assignment.dependency.is_root
-                and not assignment.dependency.name == term.dependency.name
+                and not assignment.dependency.is_same_package_as(term.dependency)
             ):
                 if not assignment.is_positive():
                     continue
@@ -203,15 +202,15 @@ class PartialSolution:
         return self.relation(term) == SetRelation.SUBSET
 
     def relation(self, term):  # type: (Term) -> int
-        positive = self._positive.get(term.dependency.name)
+        positive = self._positive.get(term.dependency.complete_name)
         if positive is not None:
             return positive.relation(term)
 
-        by_ref = self._negative.get(term.dependency.name)
+        by_ref = self._negative.get(term.dependency.complete_name)
         if by_ref is None:
             return SetRelation.OVERLAPPING
 
-        negative = by_ref[term.dependency.name]
+        negative = by_ref[term.dependency.complete_name]
         if negative is None:
             return SetRelation.OVERLAPPING
 

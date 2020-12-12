@@ -1,9 +1,10 @@
 import logging
 import os
 import re
-import time
+import urllib.parse
 
 from contextlib import contextmanager
+from pathlib import Path
 from tempfile import mkdtemp
 from typing import Any
 from typing import List
@@ -31,9 +32,6 @@ from poetry.packages import DependencyPackage
 from poetry.packages.package_collection import PackageCollection
 from poetry.puzzle.exceptions import OverrideNeeded
 from poetry.repositories import Pool
-from poetry.utils._compat import OrderedDict
-from poetry.utils._compat import Path
-from poetry.utils._compat import urlparse
 from poetry.utils.env import Env
 from poetry.utils.helpers import download_file
 from poetry.utils.helpers import safe_rmtree
@@ -44,10 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 class Indicator(ProgressIndicator):
-    def _formatter_elapsed(self):
-        elapsed = time.time() - self._start_time
-
-        return "{:.1f}s".format(elapsed)
+    pass
 
 
 class Provider:
@@ -67,6 +62,7 @@ class Provider:
         self._in_progress = False
         self._overrides = {}
         self._deferred_cache = {}
+        self._load_deferred = True
 
     @property
     def pool(self):  # type: () -> Pool
@@ -77,6 +73,9 @@ class Provider:
 
     def set_overrides(self, overrides):
         self._overrides = overrides
+
+    def load_deferred(self, load_deferred):  # type: (bool) -> None
+        self._load_deferred = load_deferred
 
     @contextmanager
     def use_environment(self, env):  # type: (Env) -> Provider
@@ -101,9 +100,9 @@ class Provider:
         if dependency.is_root:
             return PackageCollection(dependency, [self._package])
 
-        for constraint in self._search_for.keys():
+        for constraint in self._search_for:
             if (
-                constraint.name == dependency.name
+                constraint.is_same_package_as(dependency)
                 and constraint.constraint.intersect(dependency.constraint)
                 == dependency.constraint
             ):
@@ -132,15 +131,7 @@ class Provider:
         elif dependency.is_url():
             packages = self.search_for_url(dependency)
         else:
-            constraint = dependency.constraint
-
-            packages = self._pool.find_packages(
-                dependency.name,
-                constraint,
-                extras=dependency.extras,
-                allow_prereleases=dependency.allows_prereleases(),
-                repository=dependency.source_name,
-            )
+            packages = self._pool.find_packages(dependency)
 
             packages.sort(
                 key=lambda p: (
@@ -167,16 +158,12 @@ class Provider:
         package = self.get_package_from_vcs(
             dependency.vcs,
             dependency.source,
-            dependency.reference,
+            branch=dependency.branch,
+            tag=dependency.tag,
+            rev=dependency.rev,
             name=dependency.name,
         )
-
-        for extra in dependency.extras:
-            if extra in package.extras:
-                for dep in package.extras[extra]:
-                    dep.activate()
-
-                package.requires += package.extras[extra]
+        package.develop = dependency.develop
 
         dependency._constraint = package.version
         dependency._pretty_constraint = package.version.text
@@ -187,7 +174,7 @@ class Provider:
 
     @classmethod
     def get_package_from_vcs(
-        cls, vcs, url, reference=None, name=None
+        cls, vcs, url, branch=None, tag=None, rev=None, name=None
     ):  # type: (str, str, Optional[str], Optional[str]) -> Package
         if vcs != "git":
             raise ValueError("Unsupported VCS dependency {}".format(vcs))
@@ -199,6 +186,7 @@ class Provider:
         try:
             git = Git()
             git.clone(url, tmp_dir)
+            reference = branch or tag or rev
             if reference is not None:
                 git.checkout(reference, tmp_dir)
             else:
@@ -207,10 +195,10 @@ class Provider:
             revision = git.rev_parse(reference, tmp_dir).strip()
 
             package = cls.get_package_from_directory(tmp_dir, name=name)
-
-            package.source_type = "git"
-            package.source_url = url
-            package.source_reference = revision
+            package._source_type = "git"
+            package._source_url = url
+            package._source_reference = reference
+            package._source_resolved_reference = revision
         except Exception:
             raise
         finally:
@@ -242,17 +230,9 @@ class Provider:
         if dependency.base is not None:
             package.root_dir = dependency.base
 
-        package.source_url = dependency.path.as_posix()
         package.files = [
             {"file": dependency.path.name, "hash": "sha256:" + dependency.hash()}
         ]
-
-        for extra in dependency.extras:
-            if extra in package.extras:
-                for dep in package.extras[extra]:
-                    dep.activate()
-
-                package.requires += package.extras[extra]
 
         return [package]
 
@@ -266,9 +246,6 @@ class Provider:
             raise RuntimeError(
                 "Unable to determine package info from path: {}".format(file_path)
             )
-
-        package.source_type = "file"
-        package.source_url = file_path.as_posix()
 
         return package
 
@@ -289,18 +266,10 @@ class Provider:
 
             self._deferred_cache[dependency] = (dependency, package)
 
-        package.source_url = dependency.path.as_posix()
         package.develop = dependency.develop
 
         if dependency.base is not None:
             package.root_dir = dependency.base
-
-        for extra in dependency.extras:
-            if extra in package.extras:
-                for dep in package.extras[extra]:
-                    dep.activate()
-
-                package.requires += package.extras[extra]
 
         return [package]
 
@@ -319,9 +288,6 @@ class Provider:
                     name, package.name
                 )
             )
-
-        package.source_type = "directory"
-        package.source_url = directory.as_posix()
 
         return package
 
@@ -357,13 +323,13 @@ class Provider:
     def get_package_from_url(cls, url):  # type: (str) -> Package
         with temporary_directory() as temp_dir:
             temp_dir = Path(temp_dir)
-            file_name = os.path.basename(urlparse.urlparse(url).path)
-            download_file(url, temp_dir / file_name)
+            file_name = os.path.basename(urllib.parse.urlparse(url).path)
+            download_file(url, str(temp_dir / file_name))
 
             package = cls.get_package_from_file(temp_dir / file_name)
 
-        package.source_type = "url"
-        package.source_url = url
+        package._source_type = "url"
+        package._source_url = url
 
         return package
 
@@ -447,6 +413,7 @@ class Provider:
     def complete_package(
         self, package
     ):  # type: (DependencyPackage) -> DependencyPackage
+
         if package.is_root():
             package = package.clone()
             requires = package.all_requires
@@ -461,7 +428,7 @@ class Provider:
                 self._pool.package(
                     package.name,
                     package.version.text,
-                    extras=package.requires_extras,
+                    extras=list(package.dependency.extras),
                     repository=package.dependency.source_name,
                 ),
             )
@@ -469,24 +436,52 @@ class Provider:
         else:
             requires = package.requires
 
-        # Retrieving constraints for deferred dependencies
-        for r in requires:
-            if r.is_directory():
-                self.search_for_directory(r)
-            elif r.is_file():
-                self.search_for_file(r)
-            elif r.is_vcs():
-                self.search_for_vcs(r)
-            elif r.is_url():
-                self.search_for_url(r)
+        if self._load_deferred:
+            # Retrieving constraints for deferred dependencies
+            for r in requires:
+                if r.is_directory():
+                    self.search_for_directory(r)
+                elif r.is_file():
+                    self.search_for_file(r)
+                elif r.is_vcs():
+                    self.search_for_vcs(r)
+                elif r.is_url():
+                    self.search_for_url(r)
 
-        _dependencies = [
-            r
-            for r in requires
-            if self._python_constraint.allows_any(r.python_constraint)
-            and r.name not in self.UNSAFE_PACKAGES
-            and (not self._env or r.marker.validate(self._env.marker_env))
-        ]
+        optional_dependencies = []
+        _dependencies = []
+
+        # If some extras/features were required, we need to
+        # add a special dependency representing the base package
+        # to the current package
+        if package.dependency.extras:
+            for extra in package.dependency.extras:
+                if extra not in package.extras:
+                    continue
+
+                optional_dependencies += [d.name for d in package.extras[extra]]
+
+            package = package.with_features(list(package.dependency.extras))
+            _dependencies.append(package.without_features().to_dependency())
+
+        for dep in requires:
+            if not self._python_constraint.allows_any(dep.python_constraint):
+                continue
+
+            if dep.name in self.UNSAFE_PACKAGES:
+                continue
+
+            if self._env and not dep.marker.validate(self._env.marker_env):
+                continue
+
+            if not package.is_root():
+                if (dep.is_optional() and dep.name not in optional_dependencies) or (
+                    dep.in_extras
+                    and not set(dep.in_extras).intersection(package.dependency.extras)
+                ):
+                    continue
+
+            _dependencies.append(dep)
 
         overrides = self._overrides.get(package, {})
         dependencies = []
@@ -521,7 +516,7 @@ class Provider:
         # An example of this is:
         #   - pypiwin32 (220); sys_platform == "win32" and python_version >= "3.6"
         #   - pypiwin32 (219); sys_platform == "win32" and python_version < "3.6"
-        duplicates = OrderedDict()
+        duplicates = dict()
         for dep in dependencies:
             if dep.name not in duplicates:
                 duplicates[dep.name] = []
@@ -537,7 +532,7 @@ class Provider:
             self.debug("<debug>Duplicate dependencies for {}</debug>".format(dep_name))
 
             # Regrouping by constraint
-            by_constraint = OrderedDict()
+            by_constraint = dict()
             for dep in deps:
                 if dep.constraint not in by_constraint:
                     by_constraint[dep.constraint] = []
@@ -682,18 +677,6 @@ class Provider:
                     # This dependency is not needed under current python constraint.
                     continue
                 dep.transitive_python_versions = str(python_constraint_intersection)
-
-            if (package.dependency.is_directory() or package.dependency.is_file()) and (
-                dep.is_directory() or dep.is_file()
-            ):
-                relative_path = Path(
-                    os.path.relpath(
-                        dep.full_path.as_posix(), package.root_dir.as_posix()
-                    )
-                )
-
-                # TODO: Improve the way we set the correct relative path for dependencies
-                dep._path = relative_path
 
             clean_dependencies.append(dep)
 

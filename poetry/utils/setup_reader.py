@@ -1,5 +1,7 @@
 import ast
 
+from configparser import ConfigParser
+from pathlib import Path
 from typing import Any
 from typing import Dict
 from typing import Iterable
@@ -8,15 +10,7 @@ from typing import Optional
 from typing import Tuple
 from typing import Union
 
-from ._compat import PY35
-from ._compat import Path
-from ._compat import basestring
-
-
-try:
-    from configparser import ConfigParser
-except ImportError:
-    from ConfigParser import ConfigParser
+from poetry.core.semver import Version
 
 
 class SetupReader(object):
@@ -37,8 +31,8 @@ class SetupReader(object):
     @classmethod
     def read_from_directory(
         cls, directory
-    ):  # type: (Union[basestring, Path]) -> Dict[str, Union[List, Dict]]
-        if isinstance(directory, basestring):
+    ):  # type: (Union[str, Path]) -> Dict[str, Union[List, Dict]]
+        if isinstance(directory, str):
             directory = Path(directory)
 
         result = cls.DEFAULT.copy()
@@ -57,21 +51,10 @@ class SetupReader(object):
 
         return result
 
-    @classmethod
-    def _is_empty_result(cls, result):  # type: (Dict[str, Any]) -> bool
-        return (
-            not result["install_requires"]
-            and not result["extras_require"]
-            and not result["python_requires"]
-        )
-
     def read_setup_py(
         self, filepath
-    ):  # type: (Union[basestring, Path]) -> Dict[str, Union[List, Dict]]
-        if not PY35:
-            return self.DEFAULT
-
-        if isinstance(filepath, basestring):
+    ):  # type: (Union[str, Path]) -> Dict[str, Union[List, Dict]]
+        if isinstance(filepath, str):
             filepath = Path(filepath)
 
         with filepath.open(encoding="utf-8") as f:
@@ -98,7 +81,7 @@ class SetupReader(object):
 
     def read_setup_cfg(
         self, filepath
-    ):  # type: (Union[basestring, Path]) -> Dict[str, Union[List, Dict]]
+    ):  # type: (Union[str, Path]) -> Dict[str, Union[List, Dict]]
         parser = ConfigParser()
 
         parser.read(str(filepath))
@@ -109,7 +92,7 @@ class SetupReader(object):
             name = parser.get("metadata", "name")
 
         if parser.has_option("metadata", "version"):
-            version = parser.get("metadata", "version")
+            version = Version.parse(parser.get("metadata", "version")).text
 
         install_requires = []
         extras_require = {}

@@ -7,14 +7,13 @@ import threading
 
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait
+from pathlib import Path
 from subprocess import CalledProcessError
 
 from poetry.core.packages.file_dependency import FileDependency
 from poetry.core.packages.utils.link import Link
+from poetry.core.pyproject.toml import PyProjectTOML
 from poetry.io.null_io import NullIO
-from poetry.utils._compat import OrderedDict
-from poetry.utils._compat import Path
-from poetry.utils._compat import cpu_count
 from poetry.utils._compat import decode
 from poetry.utils.env import EnvCommandError
 from poetry.utils.helpers import safe_rmtree
@@ -29,7 +28,7 @@ from .operations.update import Update
 
 
 class Executor(object):
-    def __init__(self, env, pool, config, io, parallel=True):
+    def __init__(self, env, pool, config, io, parallel=None):
         self._env = env
         self._io = io
         self._dry_run = False
@@ -39,13 +38,16 @@ class Executor(object):
         self._chef = Chef(config, self._env)
         self._chooser = Chooser(pool, self._env)
 
+        if parallel is None:
+            parallel = config.get("installer.parallel", True)
+
         if parallel:
             # This should be directly handled by ThreadPoolExecutor
             # however, on some systems the number of CPUs cannot be determined
             # (it raises a NotImplementedError), so, in this case, we assume
             # that the system only has one CPU.
             try:
-                self._max_workers = cpu_count() + 4
+                self._max_workers = os.cpu_count() + 4
             except NotImplementedError:
                 self._max_workers = 5
         else:
@@ -56,7 +58,7 @@ class Executor(object):
         self._executed_operations = 0
         self._executed = {"install": 0, "update": 0, "uninstall": 0}
         self._skipped = {"install": 0, "update": 0, "uninstall": 0}
-        self._sections = OrderedDict()
+        self._sections = dict()
         self._lock = threading.Lock()
         self._shutdown = False
 
@@ -101,17 +103,36 @@ class Executor(object):
 
         # We group operations by priority
         groups = itertools.groupby(operations, key=lambda o: -o.priority)
-        self._sections = OrderedDict()
+        self._sections = dict()
         for _, group in groups:
             tasks = []
+            serial_operations = []
             for operation in group:
                 if self._shutdown:
                     break
+
+                # Some operations are unsafe, we must execute them serially in a group
+                # https://github.com/python-poetry/poetry/issues/3086
+                # https://github.com/python-poetry/poetry/issues/2658
+                #
+                # We need to explicitly check source type here, see:
+                # https://github.com/python-poetry/poetry-core/pull/98
+                is_parallel_unsafe = operation.job_type == "uninstall" or (
+                    operation.package.develop
+                    and operation.package.source_type in {"directory", "git"}
+                )
+                if not operation.skipped and is_parallel_unsafe:
+                    serial_operations.append(operation)
+                    continue
 
                 tasks.append(self._executor.submit(self._execute_operation, operation))
 
             try:
                 wait(tasks)
+
+                for operation in serial_operations:
+                    wait([self._executor.submit(self._execute_operation, operation)])
+
             except KeyboardInterrupt:
                 self._shutdown = True
 
@@ -122,7 +143,7 @@ class Executor(object):
 
                 break
 
-        return self._shutdown
+        return 1 if self._shutdown else 0
 
     def _write(self, operation, line):
         if not self.supports_fancy_output() or not self._should_write_operation(
@@ -461,7 +482,6 @@ class Executor(object):
 
     def _install_directory(self, operation):
         from poetry.factory import Factory
-        from poetry.utils.toml_file import TomlFile
 
         package = operation.package
         operation_message = self.get_operation_message(operation)
@@ -478,28 +498,18 @@ class Executor(object):
 
         args = ["install", "--no-deps", "-U"]
 
-        pyproject = TomlFile(os.path.join(req, "pyproject.toml"))
+        pyproject = PyProjectTOML(os.path.join(req, "pyproject.toml"))
 
-        has_poetry = False
-        has_build_system = False
-        if pyproject.exists():
-            pyproject_content = pyproject.read()
-            has_poetry = (
-                "tool" in pyproject_content and "poetry" in pyproject_content["tool"]
-            )
+        if pyproject.is_poetry_project():
             # Even if there is a build system specified
             # some versions of pip (< 19.0.0) don't understand it
             # so we need to check the version of pip to know
             # if we can rely on the build system
-            pip_version = self._env.pip_version
-            pip_version_with_build_system_support = pip_version.__class__(19, 0, 0)
-            has_build_system = (
-                "build-system" in pyproject_content
-                and pip_version >= pip_version_with_build_system_support
+            legacy_pip = self._env.pip_version < self._env.pip_version.__class__(
+                19, 0, 0
             )
+            package_poetry = Factory().create_poetry(pyproject.file.path.parent)
 
-        if has_poetry:
-            package_poetry = Factory().create_poetry(pyproject.parent)
             if package.develop and not package_poetry.package.build_script:
                 from poetry.masonry.builders.editable import EditableBuilder
 
@@ -510,7 +520,7 @@ class Executor(object):
                 builder.build()
 
                 return 0
-            elif not has_build_system or package_poetry.package.build_script:
+            elif legacy_pip or package_poetry.package.build_script:
                 from poetry.core.masonry.builders.sdist import SdistBuilder
 
                 # We need to rely on creating a temporary setup.py
@@ -556,7 +566,7 @@ class Executor(object):
         git.checkout(package.source_reference, src_dir)
 
         # Now we just need to install from the source directory
-        package.source_url = str(src_dir)
+        package._source_url = str(src_dir)
 
         return self._install_directory(operation)
 
@@ -599,7 +609,7 @@ class Executor(object):
 
     def _download_archive(self, operation, link):  # type: (Operation, Link) -> Path
         response = self._authenticator.request(
-            "get", link.url, stream=True, io=self._sections.get(id(operation))
+            "get", link.url, stream=True, io=self._sections.get(id(operation), self._io)
         )
         wheel_size = response.headers.get("content-length")
         operation_message = self.get_operation_message(operation)

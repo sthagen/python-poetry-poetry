@@ -1,13 +1,16 @@
 import cgi
 import re
+import urllib.parse
 import warnings
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Generator
 from typing import Optional
 from typing import Union
 
 import requests
+import requests.auth
 
 from cachecontrol import CacheControl
 from cachecontrol.caches.file_cache import FileCache
@@ -20,21 +23,16 @@ from poetry.core.semver import VersionConstraint
 from poetry.core.semver import VersionRange
 from poetry.core.semver import parse_constraint
 from poetry.locations import REPOSITORY_CACHE_DIR
-from poetry.utils._compat import Path
 from poetry.utils.helpers import canonicalize_name
 from poetry.utils.patterns import wheel_file_re
 
+from ..config.config import Config
 from ..inspection.info import PackageInfo
-from .auth import Auth
+from ..installation.authenticator import Authenticator
 from .exceptions import PackageNotFound
 from .exceptions import RepositoryError
 from .pypi_repository import PyPiRepository
 
-
-try:
-    import urllib.parse as urlparse
-except ImportError:
-    import urlparse
 
 try:
     from html import unescape
@@ -113,7 +111,7 @@ class Page:
         for anchor in self._parsed.findall(".//a"):
             if anchor.get("href"):
                 href = anchor.get("href")
-                url = self.clean_link(urlparse.urljoin(self._url, href))
+                url = self.clean_link(urllib.parse.urljoin(self._url, href))
                 pyrequire = anchor.get("data-requires-python")
                 pyrequire = unescape(pyrequire) if pyrequire else None
 
@@ -159,15 +157,14 @@ class Page:
 
 class LegacyRepository(PyPiRepository):
     def __init__(
-        self, name, url, auth=None, disable_cache=False, cert=None, client_cert=None
-    ):  # type: (str, str, Optional[Auth], bool, Optional[Path], Optional[Path]) -> None
+        self, name, url, config=None, disable_cache=False, cert=None, client_cert=None
+    ):  # type: (str, str, Optional[Config], bool, Optional[Path], Optional[Path]) -> None
         if name == "pypi":
             raise ValueError("The name [pypi] is reserved for repositories")
 
         self._packages = []
         self._name = name
         self._url = url.rstrip("/")
-        self._auth = auth
         self._client_cert = client_cert
         self._cert = cert
         self._cache_dir = REPOSITORY_CACHE_DIR / name
@@ -183,19 +180,25 @@ class LegacyRepository(PyPiRepository):
             }
         )
 
-        self._session = CacheControl(
-            requests.session(), cache=FileCache(str(self._cache_dir / "_http"))
+        self._authenticator = Authenticator(
+            config=config or Config(use_environment=True)
         )
 
-        url_parts = urlparse.urlparse(self._url)
-        if not url_parts.username and self._auth:
-            self._session.auth = self._auth
+        self._session = CacheControl(
+            self._authenticator.session, cache=FileCache(str(self._cache_dir / "_http"))
+        )
+
+        username, password = self._authenticator.get_credentials_for_url(self._url)
+        if username is not None and password is not None:
+            self._authenticator.session.auth = requests.auth.HTTPBasicAuth(
+                username, password
+            )
 
         if self._cert:
-            self._session.verify = str(self._cert)
+            self._authenticator.session.verify = str(self._cert)
 
         if self._client_cert:
-            self._session.cert = str(self._client_cert)
+            self._authenticator.session.cert = str(self._client_cert)
 
         self._disable_cache = disable_cache
 
@@ -209,30 +212,30 @@ class LegacyRepository(PyPiRepository):
 
     @property
     def authenticated_url(self):  # type: () -> str
-        if not self._auth:
+        if not self._session.auth:
             return self.url
 
-        parsed = urlparse.urlparse(self.url)
+        parsed = urllib.parse.urlparse(self.url)
 
         return "{scheme}://{username}:{password}@{netloc}{path}".format(
             scheme=parsed.scheme,
-            username=quote(self._auth.auth.username, safe=""),
-            password=quote(self._auth.auth.password, safe=""),
+            username=quote(self._session.auth.username, safe=""),
+            password=quote(self._session.auth.password, safe=""),
             netloc=parsed.netloc,
             path=parsed.path,
         )
 
-    def find_packages(
-        self, name, constraint=None, extras=None, allow_prereleases=False
-    ):
+    def find_packages(self, dependency):
         packages = []
 
+        constraint = dependency.constraint
         if constraint is None:
             constraint = "*"
 
         if not isinstance(constraint, VersionConstraint):
             constraint = parse_constraint(constraint)
 
+        allow_prereleases = dependency.allows_prereleases()
         if isinstance(constraint, VersionRange):
             if (
                 constraint.max is not None
@@ -242,7 +245,7 @@ class LegacyRepository(PyPiRepository):
             ):
                 allow_prereleases = True
 
-        key = name
+        key = dependency.name
         if not constraint.is_any():
             key = "{}:{}".format(key, str(constraint))
 
@@ -251,7 +254,7 @@ class LegacyRepository(PyPiRepository):
         if self._cache.store("matches").has(key):
             versions = self._cache.store("matches").get(key)
         else:
-            page = self._get("/{}/".format(canonicalize_name(name).replace(".", "-")))
+            page = self._get("/{}/".format(dependency.name.replace(".", "-")))
             if page is None:
                 return []
 
@@ -270,19 +273,19 @@ class LegacyRepository(PyPiRepository):
 
         for package_versions in (versions, ignored_pre_release_versions):
             for version in package_versions:
-                package = Package(name, version)
-                package.source_type = "legacy"
-                package.source_reference = self.name
-                package.source_url = self._url
-
-                if extras is not None:
-                    package.requires_extras = extras
+                package = Package(
+                    dependency.name,
+                    version,
+                    source_type="legacy",
+                    source_reference=self.name,
+                    source_url=self._url,
+                )
 
                 packages.append(package)
 
             self._log(
                 "{} packages found for {} {}".format(
-                    len(packages), name, str(constraint)
+                    len(packages), dependency.name, str(constraint)
                 ),
                 level="debug",
             )
@@ -302,7 +305,7 @@ class LegacyRepository(PyPiRepository):
         We also need to download every file matching this release
         to get the various hashes.
 
-        Note that, this will be cached so the subsequent operations
+        Note that this will be cached so the subsequent operations
         should be much faster.
         """
         try:
@@ -311,9 +314,9 @@ class LegacyRepository(PyPiRepository):
             return self._packages[index]
         except ValueError:
             package = super(LegacyRepository, self).package(name, version, extras)
-            package.source_type = "legacy"
-            package.source_url = self._url
-            package.source_reference = self.name
+            package._source_type = "legacy"
+            package._source_url = self._url
+            package._source_reference = self.name
 
             return package
 
@@ -381,5 +384,11 @@ class LegacyRepository(PyPiRepository):
             response.raise_for_status()
         except requests.HTTPError as e:
             raise RepositoryError(e)
+
+        if response.status_code in (401, 403):
+            self._log(
+                "Authorization error accessing {url}".format(url=url), level="warn"
+            )
+            return
 
         return Page(url, response.content, response.headers)

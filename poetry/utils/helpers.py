@@ -5,13 +5,15 @@ import stat
 import tempfile
 
 from contextlib import contextmanager
+from pathlib import Path
+from typing import List
 from typing import Optional
 
 import requests
 
 from poetry.config.config import Config
+from poetry.core.packages.package import Package
 from poetry.core.version import Version
-from poetry.utils._compat import Path
 
 
 try:
@@ -100,3 +102,34 @@ def download_file(
             for chunk in response.iter_content(chunk_size=chunk_size):
                 if chunk:
                     f.write(chunk)
+
+
+def get_package_version_display_string(
+    package, root=None
+):  # type: (Package, Optional[Path]) -> str
+    if package.source_type in ["file", "directory"] and root:
+        return "{} {}".format(
+            package.version,
+            Path(os.path.relpath(package.source_url, root.as_posix())).as_posix(),
+        )
+
+    return package.full_pretty_version
+
+
+def paths_csv(paths):  # type: (List[Path]) -> str
+    return ", ".join('"{}"'.format(str(c)) for c in paths)
+
+
+def is_dir_writable(path, create=False):  # type: (Path, bool) -> bool
+    try:
+        if not path.exists():
+            if not create:
+                return False
+            path.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryFile(dir=str(path)):
+            pass
+    except (IOError, OSError):
+        return False
+    else:
+        return True

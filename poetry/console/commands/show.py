@@ -35,8 +35,12 @@ lists all packages available."""
     def handle(self):
         from clikit.utils.terminal import Terminal
 
-        from poetry.core.semver import Version
+        from poetry.io.null_io import NullIO
+        from poetry.puzzle.solver import Solver
         from poetry.repositories.installed_repository import InstalledRepository
+        from poetry.repositories.pool import Pool
+        from poetry.repositories.repository import Repository
+        from poetry.utils.helpers import get_package_version_display_string
 
         package = self.argument("package")
 
@@ -47,11 +51,13 @@ lists all packages available."""
             self._args.set_option("latest", True)
 
         include_dev = not self.option("no-dev")
-        locked_repo = self.poetry.locker.locked_repository(include_dev)
+        locked_repo = self.poetry.locker.locked_repository(True)
 
         # Show tree view if requested
         if self.option("tree") and not package:
-            requires = self.poetry.package.requires + self.poetry.package.dev_requires
+            requires = self.poetry.package.requires
+            if include_dev:
+                requires += self.poetry.package.dev_requires
             packages = locked_repo.packages
             for package in packages:
                 for require in requires:
@@ -64,6 +70,25 @@ lists all packages available."""
         table = self.table(style="compact")
         # table.style.line_vc_char = ""
         locked_packages = locked_repo.packages
+        pool = Pool(ignore_repository_names=True)
+        pool.add_repository(locked_repo)
+        solver = Solver(
+            self.poetry.package,
+            pool=pool,
+            installed=Repository(),
+            locked=locked_repo,
+            io=NullIO(),
+        )
+        solver.provider.load_deferred(False)
+        with solver.use_environment(self.env):
+            ops = solver.solve()
+
+        required_locked_packages = set([op.package for op in ops if not op.skipped])
+
+        if self.option("no-dev"):
+            required_locked_packages = [
+                p for p in locked_packages if p.category == "main"
+            ]
 
         if package:
             pkg = None
@@ -109,20 +134,11 @@ lists all packages available."""
         latest_packages = {}
         latest_statuses = {}
         installed_repo = InstalledRepository.load(self.env)
-        skipped = []
-
-        python = Version.parse(".".join([str(i) for i in self.env.version_info[:3]]))
 
         # Computing widths
         for locked in locked_packages:
-            python_constraint = locked.python_constraint
-            if not python_constraint.allows(python) or not self.env.is_valid_for_marker(
-                locked.marker
-            ):
-                skipped.append(locked)
-
-                if not show_all:
-                    continue
+            if locked not in required_locked_packages and not show_all:
+                continue
 
             current_length = len(locked.pretty_name)
             if not self._io.output.supports_ansi():
@@ -144,12 +160,31 @@ lists all packages available."""
                 if not self.option("outdated") or update_status != "up-to-date":
                     name_length = max(name_length, current_length)
                     version_length = max(
-                        version_length, len(locked.full_pretty_version)
+                        version_length,
+                        len(
+                            get_package_version_display_string(
+                                locked, root=self.poetry.file.parent
+                            )
+                        ),
                     )
-                    latest_length = max(latest_length, len(latest.full_pretty_version))
+                    latest_length = max(
+                        latest_length,
+                        len(
+                            get_package_version_display_string(
+                                latest, root=self.poetry.file.parent
+                            )
+                        ),
+                    )
             else:
                 name_length = max(name_length, current_length)
-                version_length = max(version_length, len(locked.full_pretty_version))
+                version_length = max(
+                    version_length,
+                    len(
+                        get_package_version_display_string(
+                            locked, root=self.poetry.file.parent
+                        )
+                    ),
+                )
 
         write_version = name_length + version_length + 3 <= width
         write_latest = name_length + version_length + latest_length + 3 <= width
@@ -159,7 +194,7 @@ lists all packages available."""
             color = "cyan"
             name = locked.pretty_name
             install_marker = ""
-            if locked in skipped:
+            if locked not in required_locked_packages:
                 if not show_all:
                     continue
 
@@ -185,7 +220,10 @@ lists all packages available."""
             )
             if write_version:
                 line += " <b>{:{}}</b>".format(
-                    locked.full_pretty_version, version_length
+                    get_package_version_display_string(
+                        locked, root=self.poetry.file.parent
+                    ),
+                    version_length,
                 )
             if show_latest:
                 latest = latest_packages[locked.pretty_name]
@@ -199,7 +237,11 @@ lists all packages available."""
                         color = "yellow"
 
                     line += " <fg={}>{:{}}</>".format(
-                        color, latest.full_pretty_version, latest_length
+                        color,
+                        get_package_version_display_string(
+                            latest, root=self.poetry.file.parent
+                        ),
+                        latest_length,
                     )
 
             if write_description:

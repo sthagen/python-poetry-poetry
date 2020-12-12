@@ -4,14 +4,13 @@ import os
 import re
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
 
 from poetry.locations import CACHE_DIR
-from poetry.utils._compat import Path
-from poetry.utils._compat import basestring
 
 from .config_source import ConfigSource
 from .dict_config_source import DictConfigSource
@@ -34,10 +33,12 @@ class Config(object):
         "cache-dir": str(CACHE_DIR),
         "virtualenvs": {
             "create": True,
-            "in-project": False,
+            "in-project": None,
             "path": os.path.join("{cache-dir}", "virtualenvs"),
+            "options": {"always-copy": False},
         },
         "experimental": {"new-installer": True},
+        "installer": {"parallel": True},
     }
 
     def __init__(
@@ -87,7 +88,11 @@ class Config(object):
             for key in config:
                 value = self.get(parent_key + key)
                 if isinstance(value, dict):
-                    all_[key] = _all(config[key], parent_key=key + ".")
+                    if parent_key != "":
+                        current_parent = parent_key + key + "."
+                    else:
+                        current_parent = key + "."
+                    all_[key] = _all(config[key], parent_key=current_parent)
                     continue
 
                 all_[key] = value
@@ -125,20 +130,18 @@ class Config(object):
         return self.process(value)
 
     def process(self, value):  # type: (Any) -> Any
-        if not isinstance(value, basestring):
+        if not isinstance(value, str):
             return value
 
         return re.sub(r"{(.+?)}", lambda m: self.get(m.group(1)), value)
 
-    def _get_validator(self, name):  # type: (str) -> Callable
-        if name in {"virtualenvs.create", "virtualenvs.in-project"}:
-            return boolean_validator
-
-        if name == "virtualenvs.path":
-            return str
-
     def _get_normalizer(self, name):  # type: (str) -> Callable
-        if name in {"virtualenvs.create", "virtualenvs.in-project"}:
+        if name in {
+            "virtualenvs.create",
+            "virtualenvs.in-project",
+            "virtualenvs.options.always-copy",
+            "installer.parallel",
+        }:
             return boolean_normalizer
 
         if name == "virtualenvs.path":

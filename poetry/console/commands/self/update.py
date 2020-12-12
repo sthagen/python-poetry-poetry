@@ -15,6 +15,8 @@ from gzip import GzipFile
 from cleo import argument
 from cleo import option
 
+from poetry.core.packages import Dependency
+
 from ..command import Command
 
 
@@ -60,7 +62,7 @@ class SelfUpdateCommand(Command):
 
     @property
     def home(self):
-        from poetry.utils._compat import Path
+        from pathlib import Path
 
         return Path(os.environ.get("POETRY_HOME", "~/.poetry")).expanduser()
 
@@ -89,7 +91,7 @@ class SelfUpdateCommand(Command):
 
         repo = PyPiRepository(fallback=False)
         packages = repo.find_packages(
-            "poetry", version, allow_prereleases=self.option("preview")
+            Dependency("poetry", version, allows_prereleases=self.option("preview"))
         )
         if not packages:
             self.line("No release found for the specified version")
@@ -237,7 +239,7 @@ class SelfUpdateCommand(Command):
         return subprocess.check_output(list(args), stderr=subprocess.STDOUT)
 
     def _check_recommended_installation(self):
-        from poetry.utils._compat import Path
+        from pathlib import Path
 
         current = Path(__file__)
         try:
@@ -254,14 +256,6 @@ class SelfUpdateCommand(Command):
             platform = "linux"
 
         return "poetry-{}-{}".format(version, platform)
-
-    def _bin_path(self, base_path, bin):
-        from poetry.utils._compat import WINDOWS
-
-        if WINDOWS:
-            return (base_path / "Scripts" / bin).with_suffix(".exe")
-
-        return base_path / "bin" / bin
 
     def make_bin(self):
         from poetry.utils._compat import WINDOWS

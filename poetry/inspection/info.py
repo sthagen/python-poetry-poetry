@@ -4,6 +4,7 @@ import os
 import tarfile
 import zipfile
 
+from pathlib import Path
 from typing import Dict
 from typing import Iterator
 from typing import List
@@ -16,8 +17,7 @@ from poetry.core.factory import Factory
 from poetry.core.packages import Package
 from poetry.core.packages import ProjectPackage
 from poetry.core.packages import dependency_from_pep_508
-from poetry.core.utils._compat import PY35
-from poetry.core.utils._compat import Path
+from poetry.core.pyproject.toml import PyProjectTOML
 from poetry.core.utils.helpers import parse_requires
 from poetry.core.utils.helpers import temporary_directory
 from poetry.core.version.markers import InvalidMarker
@@ -25,7 +25,6 @@ from poetry.utils.env import EnvCommandError
 from poetry.utils.env import EnvManager
 from poetry.utils.env import VirtualEnv
 from poetry.utils.setup_reader import SetupReader
-from poetry.utils.toml_file import TomlFile
 
 
 logger = logging.getLogger(__name__)
@@ -43,9 +42,14 @@ PEP517_META_BUILD_DEPS = ["pep517===0.8.2", "toml==0.10.1"]
 
 
 class PackageInfoError(ValueError):
-    def __init__(self, path):  # type: (Union[Path, str]) -> None
+    def __init__(
+        self, path, *reasons
+    ):  # type: (Union[Path, str], *Union[BaseException, str]) -> None
+        reasons = (
+            "Unable to determine package info for path: {}".format(str(path)),
+        ) + reasons
         super(PackageInfoError, self).__init__(
-            "Unable to determine package info for path: {}".format(str(path))
+            "\n\n".join(str(msg).strip() for msg in reasons if msg)
         )
 
 
@@ -69,6 +73,9 @@ class PackageInfo:
         self.requires_python = requires_python
         self.files = files or []
         self._cache_version = cache_version
+        self._source_type = None
+        self._source_url = None
+        self._source_reference = None
 
     @property
     def cache_version(self):  # type: () -> Optional[str]
@@ -136,11 +143,28 @@ class PackageInfo:
                 "Unable to retrieve the package version for {}".format(name)
             )
 
-        package = Package(name=name, version=self.version)
+        package = Package(
+            name=name,
+            version=self.version,
+            source_type=self._source_type,
+            source_url=self._source_url,
+            source_reference=self._source_reference,
+        )
         package.description = self.summary
         package.root_dir = root_dir
         package.python_versions = self.requires_python or "*"
         package.files = self.files
+
+        if root_dir or (self._source_type in {"directory"} and self._source_url):
+            # this is a local poetry project, this means we can extract "richer" requirement information
+            # eg: development requirements etc.
+            poetry_package = self._get_poetry_package(path=root_dir or self._source_url)
+            if poetry_package:
+                package.extras = poetry_package.extras
+                package.requires = poetry_package.requires
+                return package
+
+        seen_requirements = set()
 
         for req in self.requires_dist or []:
             try:
@@ -166,15 +190,13 @@ class PackageInfo:
                         # this is the first time we encounter this extra for this package
                         package.extras[extra] = []
 
-                    # Activate extra dependencies if specified
-                    if extras and extra in extras:
-                        dependency.activate()
-
                     package.extras[extra].append(dependency)
 
-            if not dependency.is_optional() or dependency.is_activated():
-                # we skip add only if the dependency is option and was not activated as part of an extra
+            req = dependency.to_pep_508(with_extras=True)
+
+            if req not in seen_requirements:
                 package.requires.append(dependency)
+                seen_requirements.add(req)
 
         return package
 
@@ -197,7 +219,7 @@ class PackageInfo:
                 with requires.open(encoding="utf-8") as f:
                     requirements = parse_requires(f.read())
 
-        return cls(
+        info = cls(
             name=dist.name,
             version=dist.version,
             summary=dist.summary,
@@ -205,6 +227,11 @@ class PackageInfo:
             requires_dist=requirements,
             requires_python=dist.requires_python,
         )
+
+        info._source_type = "file"
+        info._source_url = Path(dist.filename).resolve().as_posix()
+
+        return info
 
     @classmethod
     def _from_sdist_file(cls, path):  # type: (Path) -> PackageInfo
@@ -281,12 +308,14 @@ class PackageInfo:
         :param path: Path to `setup.py` file
         """
         if not cls.has_setup_files(path):
-            raise PackageInfoError(path)
+            raise PackageInfoError(
+                path, "No setup files (setup.py, setup.cfg) was found."
+            )
 
         try:
             result = SetupReader.read_from_directory(path)
-        except Exception:
-            raise PackageInfoError(path)
+        except Exception as e:
+            raise PackageInfoError(path, e)
 
         python_requires = result["python_requires"]
         if python_requires is None:
@@ -319,7 +348,10 @@ class PackageInfo:
 
         if not (info.name and info.version) and not info.requires_dist:
             # there is nothing useful here
-            raise PackageInfoError(path)
+            raise PackageInfoError(
+                path,
+                "No core metadata (name, version, requires-dist) could be retrieved.",
+            )
 
         return info
 
@@ -331,13 +363,10 @@ class PackageInfo:
         :param path: Path to search.
         """
         pattern = "**/*.*-info"
-        if PY35:
-            # Sometimes pathlib will fail on recursive symbolic links, so we need to workaround it
-            # and use the glob module instead. Note that this does not happen with pathlib2
-            # so it's safe to use it for Python < 3.4.
-            directories = glob.iglob(path.joinpath(pattern).as_posix(), recursive=True)
-        else:
-            directories = path.glob(pattern)
+        # Sometimes pathlib will fail on recursive symbolic links, so we need to workaround it
+        # and use the glob module instead. Note that this does not happen with pathlib2
+        # so it's safe to use it for Python < 3.4.
+        directories = glob.iglob(path.joinpath(pattern).as_posix(), recursive=True)
 
         for d in directories:
             yield Path(d)
@@ -401,21 +430,10 @@ class PackageInfo:
 
     @staticmethod
     def _get_poetry_package(path):  # type: (Path) -> Optional[ProjectPackage]
-        pyproject = path.joinpath("pyproject.toml")
-        try:
-            # Note: we ignore any setup.py file at this step
-            if pyproject.exists():
-                # TODO: add support for handling non-poetry PEP-517 builds
-                pyproject = TomlFile(pyproject)
-                pyproject_content = pyproject.read()
-                supports_poetry = (
-                    "tool" in pyproject_content
-                    and "poetry" in pyproject_content["tool"]
-                )
-                if supports_poetry:
-                    return Factory().create_poetry(path).package
-        except RuntimeError:
-            pass
+        # Note: we ignore any setup.py file at this step
+        # TODO: add support for handling non-poetry PEP-517 builds
+        if PyProjectTOML(path.joinpath("pyproject.toml")).is_poetry_project():
+            return Factory().create_poetry(path).package
 
     @classmethod
     def _pep517_metadata(cls, path):  # type (Path) -> PackageInfo
@@ -427,7 +445,7 @@ class PackageInfo:
         info = None
         try:
             info = cls.from_setup_files(path)
-            if info.requires_dist is not None:
+            if all([info.version, info.name, info.requires_dist]):
                 return info
         except PackageInfoError:
             pass
@@ -465,15 +483,21 @@ class PackageInfo:
                 cls._log("PEP517 build failed: {}".format(e), level="debug")
                 setup_py = path / "setup.py"
                 if not setup_py.exists():
-                    raise PackageInfoError(path)
+                    raise PackageInfoError(
+                        path,
+                        e,
+                        "No fallback setup.py file was found to generate egg_info.",
+                    )
 
                 cwd = Path.cwd()
                 os.chdir(path.as_posix())
                 try:
                     venv.run("python", "setup.py", "egg_info")
                     return cls.from_metadata(path)
-                except EnvCommandError:
-                    raise PackageInfoError(path)
+                except EnvCommandError as fbe:
+                    raise PackageInfoError(
+                        path, "Fallback egg_info generation failed.", fbe
+                    )
                 finally:
                     os.chdir(cwd.as_posix())
 
@@ -484,7 +508,7 @@ class PackageInfo:
             return info
 
         # if we reach here, everything has failed and all hope is lost
-        raise PackageInfoError(path)
+        raise PackageInfoError(path, "Exhausted all core metadata sources.")
 
     @classmethod
     def from_directory(
@@ -501,23 +525,26 @@ class PackageInfo:
         """
         project_package = cls._get_poetry_package(path)
         if project_package:
-            return cls.from_package(project_package)
+            info = cls.from_package(project_package)
+        else:
+            info = cls.from_metadata(path)
 
-        info = cls.from_metadata(path)
+            if not info or info.requires_dist is None:
+                try:
+                    if disable_build:
+                        info = cls.from_setup_files(path)
+                    else:
+                        info = cls._pep517_metadata(path)
+                except PackageInfoError:
+                    if not info:
+                        raise
 
-        if info and info.requires_dist is not None:
-            # return only if requirements are discovered
-            return info
+                    # we discovered PkgInfo but no requirements were listed
 
-        try:
-            if disable_build:
-                return cls.from_setup_files(path)
-            return cls._pep517_metadata(path)
-        except PackageInfoError as e:
-            if info:
-                # we discovered PkgInfo but no requirements were listed
-                return info
-            raise e
+        info._source_type = "directory"
+        info._source_url = path.as_posix()
+
+        return info
 
     @classmethod
     def from_sdist(cls, path):  # type: (Path) -> PackageInfo
@@ -560,8 +587,8 @@ class PackageInfo:
 
         try:
             return cls._from_distribution(pkginfo.BDist(str(path)))
-        except ValueError:
-            raise PackageInfoError(path)
+        except ValueError as e:
+            raise PackageInfoError(path, e)
 
     @classmethod
     def from_path(cls, path):  # type: (Path) -> PackageInfo

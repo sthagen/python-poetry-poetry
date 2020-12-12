@@ -1,8 +1,8 @@
 import logging
 
+from pathlib import Path
 from typing import Optional
 
-from poetry.utils._compat import Path
 from poetry.utils.helpers import get_cert
 from poetry.utils.helpers import get_client_cert
 from poetry.utils.password_manager import PasswordManager
@@ -86,7 +86,7 @@ class Publisher:
             "to <info>{}</info>".format(
                 self._package.pretty_name,
                 self._package.pretty_version,
-                {"pypi": "PyPI"}.get(repository_name, "PyPI"),
+                "PyPI" if repository_name == "pypi" else repository_name,
             )
         )
 

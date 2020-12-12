@@ -1,11 +1,11 @@
 import itertools
 
+from pathlib import Path
 from typing import Set
 from typing import Union
 
 from poetry.core.packages import Package
 from poetry.core.utils.helpers import module_name
-from poetry.utils._compat import Path
 from poetry.utils._compat import metadata
 from poetry.utils.env import Env
 
@@ -76,9 +76,9 @@ class InstalledRepository(Repository):
         revision = git.rev_parse("HEAD", src).strip()
         url = git.remote_url(src)
 
-        package.source_type = "git"
-        package.source_url = url
-        package.source_reference = revision
+        package._source_type = "git"
+        package._source_url = url
+        package._source_reference = revision
 
     @classmethod
     def set_package_vcs_properties(cls, package, env):  # type: (Package, Env) -> None
@@ -138,21 +138,29 @@ class InstalledRepository(Repository):
                     if path.name.endswith(".dist-info"):
                         paths = cls.get_package_paths(env=env, name=package.pretty_name)
                         if paths:
+                            is_editable_package = False
                             for src in paths:
                                 if cls.is_vcs_package(src, env):
                                     cls.set_package_vcs_properties(package, env)
                                     break
+
+                                if not (
+                                    is_editable_package
+                                    or env.is_path_relative_to_lib(src)
+                                ):
+                                    is_editable_package = True
                             else:
                                 # TODO: handle multiple source directories?
-                                package.source_type = "directory"
-                                package.source_url = paths.pop().as_posix()
+                                if is_editable_package:
+                                    package._source_type = "directory"
+                                    package._source_url = paths.pop().as_posix()
                     continue
 
                 if cls.is_vcs_package(path, env):
                     cls.set_package_vcs_properties(package, env)
                 else:
                     # If not, it's a path dependency
-                    package.source_type = "directory"
-                    package.source_url = str(path.parent)
+                    package._source_type = "directory"
+                    package._source_url = str(path.parent)
 
         return repo

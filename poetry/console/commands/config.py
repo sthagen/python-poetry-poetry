@@ -4,6 +4,8 @@ import re
 from cleo import argument
 from cleo import option
 
+from poetry.core.pyproject import PyProjectException
+from poetry.core.toml.file import TOMLFile
 from poetry.factory import Factory
 
 from .command import Command
@@ -39,10 +41,11 @@ To remove a repository (repo is a short alias for repositories):
 
     @property
     def unique_config_values(self):
+        from pathlib import Path
+
         from poetry.config.config import boolean_normalizer
         from poetry.config.config import boolean_validator
         from poetry.locations import CACHE_DIR
-        from poetry.utils._compat import Path
 
         unique_config_values = {
             "cache-dir": (
@@ -62,26 +65,31 @@ To remove a repository (repo is a short alias for repositories):
                 boolean_normalizer,
                 True,
             ),
+            "virtualenvs.options.always-copy": (
+                boolean_validator,
+                boolean_normalizer,
+                False,
+            ),
+            "installer.parallel": (boolean_validator, boolean_normalizer, True,),
         }
 
         return unique_config_values
 
     def handle(self):
+        from pathlib import Path
+
         from poetry.config.file_config_source import FileConfigSource
         from poetry.locations import CONFIG_DIR
-        from poetry.utils._compat import Path
-        from poetry.utils._compat import basestring
-        from poetry.utils.toml_file import TomlFile
 
         config = Factory.create_config(self.io)
-        config_file = TomlFile(Path(CONFIG_DIR) / "config.toml")
+        config_file = TOMLFile(Path(CONFIG_DIR) / "config.toml")
 
         try:
-            local_config_file = TomlFile(self.poetry.file.parent / "poetry.toml")
+            local_config_file = TOMLFile(self.poetry.file.parent / "poetry.toml")
             if local_config_file.exists():
                 config.merge(local_config_file.read())
-        except RuntimeError:
-            local_config_file = TomlFile(Path.cwd() / "poetry.toml")
+        except (RuntimeError, PyProjectException):
+            local_config_file = TOMLFile(Path.cwd() / "poetry.toml")
 
         if self.option("local"):
             config.set_config_source(FileConfigSource(local_config_file))
@@ -127,7 +135,7 @@ To remove a repository (repo is a short alias for repositories):
 
                 value = config.get(setting_key)
 
-                if not isinstance(value, basestring):
+                if not isinstance(value, str):
                     value = json.dumps(value)
 
                 self.line(value)
@@ -260,8 +268,6 @@ To remove a repository (repo is a short alias for repositories):
         return 0
 
     def _list_configuration(self, config, raw, k=""):
-        from poetry.utils._compat import basestring
-
         orig_k = k
         for key, value in sorted(config.items()):
             if k + key in self.LIST_PROHIBITED_SETTINGS:
@@ -286,7 +292,7 @@ To remove a repository (repo is a short alias for repositories):
                 message = "<c1>{}</c1> = <c2>{}</c2>".format(
                     k + key, json.dumps(raw_val)
                 )
-            elif isinstance(raw_val, basestring) and raw_val != value:
+            elif isinstance(raw_val, str) and raw_val != value:
                 message = "<c1>{}</c1> = <c2>{}</c2>  # {}".format(
                     k + key, json.dumps(raw_val), value
                 )
@@ -294,14 +300,6 @@ To remove a repository (repo is a short alias for repositories):
                 message = "<c1>{}</c1> = <c2>{}</c2>".format(k + key, json.dumps(value))
 
             self.line(message)
-
-    def _list_setting(self, contents, setting=None, k=None, default=None):
-        values = self._get_setting(contents, setting, k, default)
-
-        for value in values:
-            self.line(
-                "<comment>{}</comment> = <info>{}</info>".format(value[0], value[1])
-            )
 
     def _get_setting(self, contents, setting=None, k=None, default=None):
         orig_k = k
@@ -344,11 +342,3 @@ To remove a repository (repo is a short alias for repositories):
                 values.append(((k or "") + key, value))
 
             return values
-
-    def _get_formatted_value(self, value):
-        if isinstance(value, list):
-            value = [json.dumps(val) if isinstance(val, list) else val for val in value]
-
-            value = "[{}]".format(", ".join(value))
-
-        return json.dumps(value)

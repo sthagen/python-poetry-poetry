@@ -1,7 +1,9 @@
 import logging
 import os
+import urllib.parse
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Dict
 from typing import List
 from typing import Union
@@ -14,6 +16,7 @@ from cachecontrol.controller import logger as cache_control_logger
 from cachy import CacheManager
 from html5lib.html5parser import parse
 
+from poetry.core.packages import Dependency
 from poetry.core.packages import Package
 from poetry.core.packages import dependency_from_pep_508
 from poetry.core.packages.utils.link import Link
@@ -23,7 +26,6 @@ from poetry.core.semver import parse_constraint
 from poetry.core.semver.exceptions import ParseVersionError
 from poetry.core.version.markers import parse_marker
 from poetry.locations import REPOSITORY_CACHE_DIR
-from poetry.utils._compat import Path
 from poetry.utils._compat import to_str
 from poetry.utils.helpers import download_file
 from poetry.utils.helpers import temporary_directory
@@ -32,12 +34,6 @@ from poetry.utils.patterns import wheel_file_re
 from ..inspection.info import PackageInfo
 from .exceptions import PackageNotFound
 from .remote_repository import RemoteRepository
-
-
-try:
-    import urllib.parse as urlparse
-except ImportError:
-    import urlparse
 
 
 cache_control_logger.setLevel(logging.ERROR)
@@ -79,22 +75,18 @@ class PyPiRepository(RemoteRepository):
     def session(self):
         return self._session
 
-    def find_packages(
-        self,
-        name,  # type: str
-        constraint=None,  # type: Union[VersionConstraint, str, None]
-        extras=None,  # type: Union[list, None]
-        allow_prereleases=False,  # type: bool
-    ):  # type: (...) -> List[Package]
+    def find_packages(self, dependency):  # type: (Dependency) -> List[Package]
         """
         Find packages on the remote server.
         """
+        constraint = dependency.constraint
         if constraint is None:
             constraint = "*"
 
         if not isinstance(constraint, VersionConstraint):
             constraint = parse_constraint(constraint)
 
+        allow_prereleases = dependency.allows_prereleases()
         if isinstance(constraint, VersionRange):
             if (
                 constraint.max is not None
@@ -105,10 +97,10 @@ class PyPiRepository(RemoteRepository):
                 allow_prereleases = True
 
         try:
-            info = self.get_package_info(name)
+            info = self.get_package_info(dependency.name)
         except PackageNotFound:
             self._log(
-                "No packages found for {} {}".format(name, str(constraint)),
+                "No packages found for {} {}".format(dependency.name, str(constraint)),
                 level="debug",
             )
             return []
@@ -121,7 +113,7 @@ class PyPiRepository(RemoteRepository):
                 # Bad release
                 self._log(
                     "No release information found for {}-{}, skipping".format(
-                        name, version
+                        dependency.name, version
                     ),
                     level="debug",
                 )
@@ -132,7 +124,7 @@ class PyPiRepository(RemoteRepository):
             except ParseVersionError:
                 self._log(
                     'Unable to parse version "{}" for the {} package, skipping'.format(
-                        version, name
+                        version, dependency.name
                     ),
                     level="debug",
                 )
@@ -145,13 +137,12 @@ class PyPiRepository(RemoteRepository):
                 continue
 
             if not constraint or (constraint and constraint.allows(package.version)):
-                if extras is not None:
-                    package.requires_extras = extras
-
                 packages.append(package)
 
         self._log(
-            "{} packages found for {} {}".format(len(packages), name, str(constraint)),
+            "{} packages found for {} {}".format(
+                len(packages), dependency.name, str(constraint)
+            ),
             level="debug",
         )
 
@@ -428,11 +419,13 @@ class PyPiRepository(RemoteRepository):
 
     def _get_info_from_wheel(self, url):  # type: (str) -> PackageInfo
         self._log(
-            "Downloading wheel: {}".format(urlparse.urlparse(url).path.rsplit("/")[-1]),
+            "Downloading wheel: {}".format(
+                urllib.parse.urlparse(url).path.rsplit("/")[-1]
+            ),
             level="debug",
         )
 
-        filename = os.path.basename(urlparse.urlparse(url).path.rsplit("/")[-1])
+        filename = os.path.basename(urllib.parse.urlparse(url).path.rsplit("/")[-1])
 
         with temporary_directory() as temp_dir:
             filepath = Path(temp_dir) / filename
@@ -442,11 +435,13 @@ class PyPiRepository(RemoteRepository):
 
     def _get_info_from_sdist(self, url):  # type: (str) -> PackageInfo
         self._log(
-            "Downloading sdist: {}".format(urlparse.urlparse(url).path.rsplit("/")[-1]),
+            "Downloading sdist: {}".format(
+                urllib.parse.urlparse(url).path.rsplit("/")[-1]
+            ),
             level="debug",
         )
 
-        filename = os.path.basename(urlparse.urlparse(url).path)
+        filename = os.path.basename(urllib.parse.urlparse(url).path)
 
         with temporary_directory() as temp_dir:
             filepath = Path(temp_dir) / filename
