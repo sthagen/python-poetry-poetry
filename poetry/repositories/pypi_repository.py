@@ -45,7 +45,12 @@ class PyPiRepository(RemoteRepository):
 
     CACHE_VERSION = parse_constraint("1.0.0")
 
-    def __init__(self, url="https://pypi.org/", disable_cache=False, fallback=True):
+    def __init__(
+        self,
+        url: str = "https://pypi.org/",
+        disable_cache: bool = False,
+        fallback: bool = True,
+    ) -> None:
         super(PyPiRepository, self).__init__(url.rstrip("/") + "/simple/")
 
         self._base_url = url
@@ -72,10 +77,10 @@ class PyPiRepository(RemoteRepository):
         self._name = "PyPI"
 
     @property
-    def session(self):
+    def session(self) -> CacheControl:
         return self._session
 
-    def find_packages(self, dependency):  # type: (Dependency) -> List[Package]
+    def find_packages(self, dependency: Dependency) -> List[Package]:
         """
         Find packages on the remote server.
         """
@@ -150,13 +155,13 @@ class PyPiRepository(RemoteRepository):
 
     def package(
         self,
-        name,  # type: str
-        version,  # type: str
-        extras=None,  # type: (Union[list, None])
-    ):  # type: (...) -> Package
+        name: str,
+        version: str,
+        extras: (Union[list, None]) = None,
+    ) -> Package:
         return self.get_release_info(name, version).to_package(name=name, extras=extras)
 
-    def search(self, query):
+    def search(self, query: str) -> List[Package]:
         results = []
 
         search = {"q": query}
@@ -188,7 +193,7 @@ class PyPiRepository(RemoteRepository):
 
         return results
 
-    def get_package_info(self, name):  # type: (str) -> dict
+    def get_package_info(self, name: str) -> dict:
         """
         Return the package information given its name.
 
@@ -202,14 +207,14 @@ class PyPiRepository(RemoteRepository):
             name, lambda: self._get_package_info(name)
         )
 
-    def _get_package_info(self, name):  # type: (str) -> dict
+    def _get_package_info(self, name: str) -> dict:
         data = self._get("pypi/{}/json".format(name))
         if data is None:
             raise PackageNotFound("Package [{}] not found.".format(name))
 
         return data
 
-    def get_release_info(self, name, version):  # type: (str, str) -> PackageInfo
+    def get_release_info(self, name: str, version: str) -> PackageInfo:
         """
         Return the release information given a package name and a version.
 
@@ -236,7 +241,7 @@ class PyPiRepository(RemoteRepository):
 
         return PackageInfo.load(cached)
 
-    def find_links_for_package(self, package):
+    def find_links_for_package(self, package: Package) -> List[Link]:
         json_data = self._get("pypi/{}/{}/json".format(package.name, package.version))
         if json_data is None:
             return []
@@ -248,7 +253,7 @@ class PyPiRepository(RemoteRepository):
 
         return links
 
-    def _get_release_info(self, name, version):  # type: (str, str) -> dict
+    def _get_release_info(self, name: str, version: str) -> dict:
         self._log("Getting info for {} ({}) from PyPI".format(name, version), "debug")
 
         json_data = self._get("pypi/{}/{}/json".format(name, version))
@@ -309,7 +314,7 @@ class PyPiRepository(RemoteRepository):
 
         return data.asdict()
 
-    def _get(self, endpoint):  # type: (str) -> Union[dict, None]
+    def _get(self, endpoint: str) -> Union[dict, None]:
         try:
             json_response = self.session.get(self._base_url + endpoint)
         except requests.exceptions.TooManyRedirects:
@@ -325,7 +330,7 @@ class PyPiRepository(RemoteRepository):
 
         return json_data
 
-    def _get_info_from_urls(self, urls):  # type: (Dict[str, List[str]]) -> PackageInfo
+    def _get_info_from_urls(self, urls: Dict[str, List[str]]) -> PackageInfo:
         # Checking wheels first as they are more likely to hold
         # the necessary information
         if "bdist_wheel" in urls:
@@ -417,7 +422,7 @@ class PyPiRepository(RemoteRepository):
 
         return self._get_info_from_sdist(urls["sdist"][0])
 
-    def _get_info_from_wheel(self, url):  # type: (str) -> PackageInfo
+    def _get_info_from_wheel(self, url: str) -> PackageInfo:
         self._log(
             "Downloading wheel: {}".format(
                 urllib.parse.urlparse(url).path.rsplit("/")[-1]
@@ -433,7 +438,7 @@ class PyPiRepository(RemoteRepository):
 
             return PackageInfo.from_wheel(filepath)
 
-    def _get_info_from_sdist(self, url):  # type: (str) -> PackageInfo
+    def _get_info_from_sdist(self, url: str) -> PackageInfo:
         self._log(
             "Downloading sdist: {}".format(
                 urllib.parse.urlparse(url).path.rsplit("/")[-1]
@@ -449,8 +454,8 @@ class PyPiRepository(RemoteRepository):
 
             return PackageInfo.from_sdist(filepath)
 
-    def _download(self, url, dest):  # type: (str, str) -> None
+    def _download(self, url: str, dest: str) -> None:
         return download_file(url, dest, session=self.session)
 
-    def _log(self, msg, level="info"):
+    def _log(self, msg: str, level: str = "info") -> None:
         getattr(logger, level)("<debug>{}:</debug> {}".format(self._name, msg))

@@ -7,12 +7,14 @@ import sys
 import urllib.parse
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Dict
 from typing import List
+from typing import Optional
 from typing import Tuple
 from typing import Union
 
-from cleo import option
+from cleo.helpers import option
 from tomlkit import inline_table
 
 from poetry.core.pyproject import PyProjectException
@@ -20,6 +22,10 @@ from poetry.core.pyproject.toml import PyProjectTOML
 
 from .command import Command
 from .env_command import EnvCommand
+
+
+if TYPE_CHECKING:
+    from poetry.repositories import Pool
 
 
 class InitCommand(Command):
@@ -56,12 +62,12 @@ class InitCommand(Command):
 The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the current directory.
 """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super(InitCommand, self).__init__()
 
         self._pool = None
 
-    def handle(self):
+    def handle(self) -> int:
         from pathlib import Path
 
         from poetry.core.vcs.git import GitConfig
@@ -226,8 +232,11 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
             f.write(content)
 
     def _determine_requirements(
-        self, requires, allow_prereleases=False, source=None
-    ):  # type: (List[str], bool) -> List[Dict[str, str]]
+        self,
+        requires: List[str],
+        allow_prereleases: bool = False,
+        source: Optional[str] = None,
+    ) -> List[Dict[str, Union[str, List[str]]]]:
         if not requires:
             requires = []
 
@@ -353,8 +362,12 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         return result
 
     def _find_best_version_for_package(
-        self, name, required_version=None, allow_prereleases=False, source=None
-    ):  # type: (...) -> Tuple[str, str]
+        self,
+        name: str,
+        required_version: Optional[str] = None,
+        allow_prereleases: bool = False,
+        source: Optional[str] = None,
+    ) -> Tuple[str, str]:
         from poetry.version.version_selector import VersionSelector
 
         selector = VersionSelector(self._get_pool())
@@ -370,9 +383,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
 
         return package.pretty_name, selector.find_recommended_require_version(package)
 
-    def _parse_requirements(
-        self, requirements
-    ):  # type: (List[str]) -> List[Dict[str, str]]
+    def _parse_requirements(self, requirements: List[str]) -> List[Dict[str, str]]:
         from poetry.puzzle.provider import Provider
 
         result = []
@@ -489,8 +500,8 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         return result
 
     def _format_requirements(
-        self, requirements
-    ):  # type: (List[Dict[str, str]]) -> Dict[str, Union[str, Dict[str, str]]]
+        self, requirements: List[Dict[str, str]]
+    ) -> Dict[str, Union[str, Dict[str, str]]]:
         requires = {}
         for requirement in requirements:
             name = requirement.pop("name")
@@ -505,7 +516,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
 
         return requires
 
-    def _validate_author(self, author, default):
+    def _validate_author(self, author: str, default: str) -> Optional[str]:
         from poetry.core.packages.package import AUTHOR_REGEX
 
         author = author or default
@@ -522,7 +533,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
 
         return author
 
-    def _validate_license(self, license):
+    def _validate_license(self, license: str) -> str:
         from poetry.core.spdx import license_by_id
 
         if license:
@@ -530,7 +541,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
 
         return license
 
-    def _get_pool(self):
+    def _get_pool(self) -> "Pool":
         from poetry.repositories import Pool
         from poetry.repositories.pypi_repository import PyPiRepository
 

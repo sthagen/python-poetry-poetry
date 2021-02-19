@@ -24,15 +24,14 @@ classifiers = [
 [tool.poetry.dependencies]
 python = "^3.6"
 
-poetry-core = "^1.0.0"
-cleo = "^0.8.1"
-clikit = "^0.6.2"
+poetry-core = "^1.0.2"
+cleo = "^1.0.0a1"
 crashtest = "^0.3.0"
 requests = "^2.18"
 cachy = "^0.3.0"
 requests-toolbelt = "^0.9.1"
 cachecontrol = { version = "^0.12.4", extras = ["filecache"] }
-pkginfo = "^1.4"
+pkginfo = "^1.5"
 html5lib = "^1.0"
 shellingham = "^1.1"
 tomlkit = ">=0.7.0,<1.0.0"
@@ -55,7 +54,7 @@ zipp = { version = "^3.4", python = "<3.8"}
 urllib3 = "1.25.10"
 
 [tool.poetry.scripts]
-poetry = "poetry.console:main"
+poetry = "poetry.console.application:main"
 
 
 [build-system]
