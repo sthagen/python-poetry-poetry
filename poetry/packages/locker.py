@@ -26,10 +26,9 @@ from tomlkit.exceptions import TOMLKitError
 
 import poetry.repositories
 
-from poetry.core.packages import dependency_from_pep_508
 from poetry.core.packages.dependency import Dependency
 from poetry.core.packages.package import Package
-from poetry.core.semver import parse_constraint
+from poetry.core.semver.helpers import parse_constraint
 from poetry.core.semver.version import Version
 from poetry.core.toml.file import TOMLFile
 from poetry.core.version.markers import parse_marker
@@ -44,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Locker(object):
+class Locker:
 
     _VERSION = "1.1"
 
@@ -148,7 +147,7 @@ class Locker(object):
 
                     for dep in deps:
                         try:
-                            dependency = dependency_from_pep_508(dep)
+                            dependency = Dependency.create_from_pep_508(dep)
                         except InvalidRequirement:
                             # handle lock files with invalid PEP 508
                             m = re.match(r"^(.+?)(?:\[(.+?)])?(?:\s+\((.+)\))?$", dep)
@@ -472,14 +471,14 @@ class Locker(object):
         try:
             lock_data = self._lock.read()
         except TOMLKitError as e:
-            raise RuntimeError("Unable to read the lock file ({}).".format(e))
+            raise RuntimeError(f"Unable to read the lock file ({e}).")
 
         lock_version = Version.parse(lock_data["metadata"].get("lock-version", "1.0"))
         current_version = Version.parse(self._VERSION)
         # We expect the locker to be able to read lock files
         # from the same semantic versioning range
         accepted_versions = parse_constraint(
-            "^{}".format(Version(current_version.major, 0))
+            "^{}".format(Version.from_parts(current_version.major, 0))
         )
         lock_version_allowed = accepted_versions.allows(lock_version)
         if lock_version_allowed and current_version < lock_version:
@@ -514,7 +513,25 @@ class Locker(object):
                 dependencies[dependency.pretty_name] = []
 
             constraint = inline_table()
-            constraint["version"] = str(dependency.pretty_constraint)
+
+            if dependency.is_directory() or dependency.is_file():
+                constraint["path"] = dependency.path.as_posix()
+
+                if dependency.is_directory() and dependency.develop:
+                    constraint["develop"] = True
+            elif dependency.is_url():
+                constraint["url"] = dependency.url
+            elif dependency.is_vcs():
+                constraint[dependency.vcs] = dependency.source
+
+                if dependency.branch:
+                    constraint["branch"] = dependency.branch
+                elif dependency.tag:
+                    constraint["tag"] = dependency.tag
+                elif dependency.rev:
+                    constraint["rev"] = dependency.rev
+            else:
+                constraint["version"] = str(dependency.pretty_constraint)
 
             if dependency.extras:
                 constraint["extras"] = sorted(dependency.extras)
@@ -530,7 +547,10 @@ class Locker(object):
         # All the constraints should have the same type,
         # but we want to simplify them if it's possible
         for dependency, constraints in tuple(dependencies.items()):
-            if all(len(constraint) == 1 for constraint in constraints):
+            if all(
+                len(constraint) == 1 and "version" in constraint
+                for constraint in constraints
+            ):
                 dependencies[dependency] = [
                     constraint["version"] for constraint in constraints
                 ]
@@ -596,3 +616,8 @@ class Locker(object):
                 data["develop"] = package.develop
 
         return data
+
+
+class NullLocker(Locker):
+    def set_lock_data(self, root: Package, packages: List[Package]) -> bool:
+        pass
