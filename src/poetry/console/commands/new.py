@@ -34,13 +34,14 @@ class NewCommand(Command):
         from poetry.utils.env import SystemEnv
 
         if self.option("src"):
-            layout_ = layout("src")
+            layout_cls = layout("src")
         else:
-            layout_ = layout("standard")
+            layout_cls = layout("standard")
 
         path = Path(self.argument("path"))
         if not path.is_absolute():
-            # we do not use resolve here due to compatibility issues for path.resolve(strict=False)
+            # we do not use resolve here due to compatibility issues
+            # for path.resolve(strict=False)
             path = Path.cwd().joinpath(path)
 
         name = self.option("name")
@@ -50,7 +51,7 @@ class NewCommand(Command):
         if path.exists() and list(path.glob("*")):
             # Directory is not empty. Aborting.
             raise RuntimeError(
-                "Destination <fg=yellow>{}</> " "exists and is not empty".format(path)
+                f"Destination <fg=yellow>{path}</> exists and is not empty"
             )
 
         readme_format = self.option("readme") or "md"
@@ -64,11 +65,9 @@ class NewCommand(Command):
                 author += f" <{author_email}>"
 
         current_env = SystemEnv(Path(sys.executable))
-        default_python = "^{}".format(
-            ".".join(str(v) for v in current_env.version_info[:2])
-        )
+        default_python = "^" + ".".join(str(v) for v in current_env.version_info[:2])
 
-        layout_ = layout_(
+        layout_ = layout_cls(
             name,
             "0.1.0",
             author=author,
@@ -83,7 +82,6 @@ class NewCommand(Command):
             path = path.relative_to(Path.cwd())
 
         self.line(
-            "Created package <info>{}</> in <fg=blue>{}</>".format(
-                layout_._package_name, path.as_posix()
-            )
+            f"Created package <info>{layout_._package_name}</> in"
+            f" <fg=blue>{path.as_posix()}</>"
         )

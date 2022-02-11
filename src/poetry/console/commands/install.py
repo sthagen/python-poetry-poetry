@@ -34,17 +34,20 @@ class InstallCommand(InstallerCommand):
         option(
             "no-dev",
             None,
-            "Do not install the development dependencies. (<warning>Deprecated</warning>)",
+            "Do not install the development dependencies."
+            " (<warning>Deprecated</warning>)",
         ),
         option(
             "dev-only",
             None,
-            "Only install the development dependencies. (<warning>Deprecated</warning>)",
+            "Only install the development dependencies."
+            " (<warning>Deprecated</warning>)",
         ),
         option(
             "sync",
             None,
-            "Synchronize the environment with the locked packages and the specified groups.",
+            "Synchronize the environment with the locked packages and the specified"
+            " groups.",
         ),
         option(
             "no-root", None, "Do not install the root package (the current project)."
@@ -108,14 +111,16 @@ dependencies and not including the current project, run the command with the
         only_groups = []
         if self.option("no-dev"):
             self.line(
-                "<warning>The `<fg=yellow;options=bold>--no-dev</>` option is deprecated, "
-                "use the `<fg=yellow;options=bold>--without dev</>` notation instead.</warning>"
+                "<warning>The `<fg=yellow;options=bold>--no-dev</>` option is"
+                " deprecated, use the `<fg=yellow;options=bold>--without dev</>`"
+                " notation instead.</warning>"
             )
             excluded_groups.append("dev")
         elif self.option("dev-only"):
             self.line(
-                "<warning>The `<fg=yellow;options=bold>--dev-only</>` option is deprecated, "
-                "use the `<fg=yellow;options=bold>--only dev</>` notation instead.</warning>"
+                "<warning>The `<fg=yellow;options=bold>--dev-only</>` option is"
+                " deprecated, use the `<fg=yellow;options=bold>--only dev</>` notation"
+                " instead.</warning>"
             )
             only_groups.append("dev")
 
@@ -147,8 +152,9 @@ dependencies and not including the current project, run the command with the
         with_synchronization = self.option("sync")
         if self.option("remove-untracked"):
             self.line(
-                "<warning>The `<fg=yellow;options=bold>--remove-untracked</>` option is deprecated, "
-                "use the `<fg=yellow;options=bold>--sync</>` option instead.</warning>"
+                "<warning>The `<fg=yellow;options=bold>--remove-untracked</>` option is"
+                " deprecated, use the `<fg=yellow;options=bold>--sync</>` option"
+                " instead.</warning>"
             )
 
             with_synchronization = True
@@ -176,19 +182,16 @@ dependencies and not including the current project, run the command with the
             # If this is a true error it will be picked up later by build anyway.
             return 0
 
+        log_install = (
+            "<b>Installing</> the current project:"
+            f" <c1>{self.poetry.package.pretty_name}</c1>"
+            f" (<{{tag}}>{self.poetry.package.pretty_version}</>)"
+        )
+        overwrite = self._io.output.is_decorated() and not self.io.is_debug()
         self.line("")
-        if not self._io.output.is_decorated() or self.io.is_debug():
-            self.line(
-                "<b>Installing</> the current project: <c1>{}</c1> (<c2>{}</c2>)".format(
-                    self.poetry.package.pretty_name, self.poetry.package.pretty_version
-                )
-            )
-        else:
-            self.write(
-                "<b>Installing</> the current project: <c1>{}</c1> (<c2>{}</c2>)".format(
-                    self.poetry.package.pretty_name, self.poetry.package.pretty_version
-                )
-            )
+        self.write(log_install.format(tag="c2"))
+        if not overwrite:
+            self.line("")
 
         if self.option("dry-run"):
             self.line("")
@@ -196,12 +199,8 @@ dependencies and not including the current project, run the command with the
 
         builder.build()
 
-        if self._io.output.is_decorated() and not self.io.is_debug():
-            self.overwrite(
-                "<b>Installing</> the current project: <c1>{}</c1> (<success>{}</success>)".format(
-                    self.poetry.package.pretty_name, self.poetry.package.pretty_version
-                )
-            )
+        if overwrite:
+            self.overwrite(log_install.format(tag="success"))
             self.line("")
 
         return 0

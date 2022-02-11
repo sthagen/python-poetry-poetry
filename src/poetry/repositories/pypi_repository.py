@@ -109,7 +109,7 @@ class PyPiRepository(RemoteRepository):
             info = self.get_package_info(dependency.name)
         except PackageNotFound:
             self._log(
-                f"No packages found for {dependency.name} {str(constraint)}",
+                f"No packages found for {dependency.name} {constraint!s}",
                 level="debug",
             )
             return []
@@ -121,9 +121,8 @@ class PyPiRepository(RemoteRepository):
             if not release:
                 # Bad release
                 self._log(
-                    "No release information found for {}-{}, skipping".format(
-                        dependency.name, version
-                    ),
+                    f"No release information found for {dependency.name}-{version},"
+                    " skipping",
                     level="debug",
                 )
                 continue
@@ -132,9 +131,8 @@ class PyPiRepository(RemoteRepository):
                 package = Package(info["info"]["name"], version)
             except InvalidVersion:
                 self._log(
-                    'Unable to parse version "{}" for the {} package, skipping'.format(
-                        version, dependency.name
-                    ),
+                    f'Unable to parse version "{version}" for the'
+                    f" {dependency.name} package, skipping",
                     level="debug",
                 )
                 continue
@@ -149,9 +147,7 @@ class PyPiRepository(RemoteRepository):
                 packages.append(package)
 
         self._log(
-            "{} packages found for {} {}".format(
-                len(packages), dependency.name, str(constraint)
-            ),
+            f"{len(packages)} packages found for {dependency.name} {constraint!s}",
             level="debug",
         )
 
@@ -189,9 +185,8 @@ class PyPiRepository(RemoteRepository):
                 results.append(result)
             except InvalidVersion:
                 self._log(
-                    'Unable to parse version "{}" for the {} package, skipping'.format(
-                        version, name
-                    ),
+                    f'Unable to parse version "{version}" for the {name} package,'
+                    " skipping",
                     level="debug",
                 )
 
@@ -254,7 +249,7 @@ class PyPiRepository(RemoteRepository):
 
         links = []
         for url in json_data["urls"]:
-            h = "sha256={}".format(url["digests"]["sha256"])
+            h = f"sha256={url['digests']['sha256']}"
             links.append(Link(url["url"] + "#" + h))
 
         return links
@@ -334,9 +329,7 @@ class PyPiRepository(RemoteRepository):
         if json_response.status_code == 404:
             return None
 
-        json_data = json_response.json()
-
-        return json_data
+        return json_response.json()
 
     def _get_info_from_urls(self, urls: Dict[str, List[str]]) -> "PackageInfo":
         # Checking wheels first as they are more likely to hold
@@ -433,14 +426,9 @@ class PyPiRepository(RemoteRepository):
     def _get_info_from_wheel(self, url: str) -> "PackageInfo":
         from poetry.inspection.info import PackageInfo
 
-        self._log(
-            "Downloading wheel: {}".format(
-                urllib.parse.urlparse(url).path.rsplit("/")[-1]
-            ),
-            level="debug",
-        )
-
-        filename = os.path.basename(urllib.parse.urlparse(url).path.rsplit("/")[-1])
+        wheel_name = urllib.parse.urlparse(url).path.rsplit("/")[-1]
+        self._log(f"Downloading wheel: {wheel_name}", level="debug")
+        filename = os.path.basename(wheel_name)
 
         with temporary_directory() as temp_dir:
             filepath = Path(temp_dir) / filename
@@ -451,14 +439,9 @@ class PyPiRepository(RemoteRepository):
     def _get_info_from_sdist(self, url: str) -> "PackageInfo":
         from poetry.inspection.info import PackageInfo
 
-        self._log(
-            "Downloading sdist: {}".format(
-                urllib.parse.urlparse(url).path.rsplit("/")[-1]
-            ),
-            level="debug",
-        )
-
-        filename = os.path.basename(urllib.parse.urlparse(url).path)
+        sdist_name = urllib.parse.urlparse(url).path
+        self._log(f"Downloading sdist: {sdist_name.rsplit('/')[-1]}", level="debug")
+        filename = os.path.basename(sdist_name)
 
         with temporary_directory() as temp_dir:
             filepath = Path(temp_dir) / filename

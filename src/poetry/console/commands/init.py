@@ -5,6 +5,7 @@ import urllib.parse
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Any
 from typing import Dict
 from typing import List
 from typing import Mapping
@@ -17,9 +18,13 @@ from tomlkit import inline_table
 
 from poetry.console.commands.command import Command
 from poetry.console.commands.env_command import EnvCommand
+from poetry.utils.helpers import canonicalize_name
 
 
 if TYPE_CHECKING:
+    from poetry.core.packages.package import Package
+    from tomlkit.items import InlineTable
+
     from poetry.repositories import Pool
 
 
@@ -54,13 +59,14 @@ class InitCommand(Command):
     ]
 
     help = """\
-The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the current directory.
+The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the\
+ current directory.
 """
 
     def __init__(self) -> None:
         super().__init__()
 
-        self._pool = None
+        self._pool: Optional["Pool"] = None
 
     def handle(self) -> int:
         from pathlib import Path
@@ -76,13 +82,15 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         if pyproject.file.exists():
             if pyproject.is_poetry_project():
                 self.line(
-                    "<error>A pyproject.toml file with a poetry section already exists.</error>"
+                    "<error>A pyproject.toml file with a poetry section already"
+                    " exists.</error>"
                 )
                 return 1
 
             if pyproject.data.get("build-system"):
                 self.line(
-                    "<error>A pyproject.toml file with a defined build-system already exists.</error>"
+                    "<error>A pyproject.toml file with a defined build-system already"
+                    " exists.</error>"
                 )
                 return 1
 
@@ -91,7 +99,8 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         if self.io.is_interactive():
             self.line("")
             self.line(
-                "This command will guide you through creating your <info>pyproject.toml</> config."
+                "This command will guide you through creating your"
+                " <info>pyproject.toml</> config."
             )
             self.line("")
 
@@ -146,13 +155,11 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         python = self.option("python")
         if not python:
             current_env = SystemEnv(Path(sys.executable))
-            default_python = "^{}".format(
-                ".".join(str(v) for v in current_env.version_info[:2])
+            default_python = "^" + ".".join(
+                str(v) for v in current_env.version_info[:2]
             )
             question = self.create_question(
-                "Compatible Python versions [<comment>{}</comment>]: ".format(
-                    default_python
-                ),
+                f"Compatible Python versions [<comment>{default_python}</comment>]: ",
                 default=default_python,
             )
             python = self.ask(question)
@@ -167,16 +174,18 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
             )
 
         question = "Would you like to define your main dependencies interactively?"
-        help_message = (
-            "You can specify a package in the following forms:\n"
-            "  - A single name (<b>requests</b>)\n"
-            "  - A name and a constraint (<b>requests@^2.23.0</b>)\n"
-            "  - A git url (<b>git+https://github.com/python-poetry/poetry.git</b>)\n"
-            "  - A git url with a revision (<b>git+https://github.com/python-poetry/poetry.git#develop</b>)\n"
-            "  - A file path (<b>../my-package/my-package.whl</b>)\n"
-            "  - A directory (<b>../my-package/</b>)\n"
-            "  - A url (<b>https://example.com/packages/my-package-0.1.0.tar.gz</b>)\n"
-        )
+        help_message = """\
+You can specify a package in the following forms:
+  - A single name (<b>requests</b>)
+  - A name and a constraint (<b>requests@^2.23.0</b>)
+  - A git url (<b>git+https://github.com/python-poetry/poetry.git</b>)
+  - A git url with a revision\
+ (<b>git+https://github.com/python-poetry/poetry.git#develop</b>)
+  - A file path (<b>../my-package/my-package.whl</b>)
+  - A directory (<b>../my-package/</b>)
+  - A url (<b>https://example.com/packages/my-package-0.1.0.tar.gz</b>)
+"""
+
         help_displayed = False
         if self.confirm(question, True):
             if self.io.is_interactive():
@@ -188,7 +197,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
             if self.io.is_interactive():
                 self.line("")
 
-        dev_requirements = {}
+        dev_requirements: Dict[str, str] = {}
         if self.option("dev-dependency"):
             dev_requirements = self._format_requirements(
                 self._determine_requirements(self.option("dev-dependency"))
@@ -233,6 +242,28 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         with (Path.cwd() / "pyproject.toml").open("w", encoding="utf-8") as f:
             f.write(content)
 
+        return 0
+
+    def _generate_choice_list(
+        self, matches: List["Package"], canonicalized_name: str
+    ) -> List[str]:
+        choices = []
+        matches_names = [p.name for p in matches]
+        exact_match = canonicalized_name in matches_names
+        if exact_match:
+            choices.append(matches[matches_names.index(canonicalized_name)].pretty_name)
+
+        for found_package in matches:
+            if len(choices) >= 10:
+                break
+
+            if found_package.name == canonicalized_name:
+                continue
+
+            choices.append(found_package.pretty_name)
+
+        return choices
+
     def _determine_requirements(
         self,
         requires: List[str],
@@ -245,7 +276,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
             package = self.ask(
                 "Search for package to add (or leave blank to continue):"
             )
-            while package is not None:
+            while package:
                 constraint = self._parse_requirements([package])[0]
                 if (
                     "git" in constraint
@@ -258,37 +289,27 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
                     package = self.ask("\nAdd a package:")
                     continue
 
-                matches = self._get_pool().search(constraint["name"])
-
+                canonicalized_name = canonicalize_name(constraint["name"])
+                matches = self._get_pool().search(canonicalized_name)
                 if not matches:
                     self.line("<error>Unable to find package</error>")
                     package = False
                 else:
-                    choices = []
-                    matches_names = [p.name for p in matches]
-                    exact_match = constraint["name"] in matches_names
-                    if exact_match:
-                        choices.append(
-                            matches[matches_names.index(constraint["name"])].pretty_name
-                        )
+                    choices = self._generate_choice_list(matches, canonicalized_name)
 
-                    for found_package in matches:
-                        if len(choices) >= 10:
-                            break
-
-                        if found_package.name.lower() == constraint["name"].lower():
-                            continue
-
-                        choices.append(found_package.pretty_name)
-
-                    self.line(
-                        "Found <info>{}</info> packages matching <c1>{}</c1>".format(
-                            len(matches), package
-                        )
+                    info_string = (
+                        f"Found <info>{len(matches)}</info> packages matching"
+                        f" <c1>{package}</c1>"
                     )
 
+                    if len(matches) > 10:
+                        info_string += "\nShowing the first 10 matches"
+
+                    self.line(info_string)
+
                     package = self.choice(
-                        "\nEnter package # to add, or the complete package name if it is not listed",
+                        "\nEnter package # to add, or the complete package name if it"
+                        " is not listed",
                         choices,
                         attempts=3,
                     )
@@ -314,9 +335,8 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
                         )
 
                         self.line(
-                            "Using version <b>{}</b> for <c1>{}</c1>".format(
-                                package_constraint, package
-                            )
+                            f"Using version <b>{package_constraint}</b> for"
+                            f" <c1>{package}</c1>"
                         )
 
                     constraint["version"] = package_constraint
@@ -382,7 +402,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
 
         return package.pretty_name, selector.find_recommended_require_version(package)
 
-    def _parse_requirements(self, requirements: List[str]) -> List[Dict[str, str]]:
+    def _parse_requirements(self, requirements: List[str]) -> List[Dict[str, Any]]:
         from poetry.core.pyproject.exceptions import PyProjectException
 
         from poetry.puzzle.provider import Provider
@@ -473,7 +493,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
             )
             pair = pair.strip()
 
-            require = {}
+            require: Dict[str, str] = {}
             if " " in pair:
                 name, version = pair.split(" ", 2)
                 extras_m = re.search(r"\[([\w\d,-_]+)\]$", name)
@@ -518,6 +538,7 @@ The <c1>init</c1> command creates a basic <comment>pyproject.toml</> file in the
         requires = {}
         for requirement in requirements:
             name = requirement.pop("name")
+            constraint: Union[str, "InlineTable"]
             if "version" in requirement and len(requirement) == 1:
                 constraint = requirement["version"]
             else:

@@ -17,6 +17,7 @@ from poetry.repositories import Repository
 from poetry.repositories.installed_repository import InstalledRepository
 from poetry.utils.extras import get_extra_package_names
 from poetry.utils.helpers import canonicalize_name
+from poetry.utils.helpers import pluralize
 
 
 if TYPE_CHECKING:
@@ -257,10 +258,9 @@ class Installer:
             if not self._locker.is_fresh():
                 self._io.write_line(
                     "<warning>"
-                    "Warning: The lock file is not up to date with "
-                    "the latest changes in pyproject.toml. "
-                    "You may be getting outdated dependencies. "
-                    "Run update to update them."
+                    "Warning: poetry.lock is not consistent with pyproject.toml. "
+                    "You may be getting improper dependencies. "
+                    "Run `poetry lock [--no-update]` to fix it."
                     "</warning>"
                 )
 
@@ -385,23 +385,13 @@ class Installer:
                     uninstalls += 1
 
             self._io.write_line("")
-            self._io.write_line(
-                "Package operations: "
-                "<info>{}</> install{}, "
-                "<info>{}</> update{}, "
-                "<info>{}</> removal{}"
-                "{}".format(
-                    installs,
-                    "" if installs == 1 else "s",
-                    updates,
-                    "" if updates == 1 else "s",
-                    uninstalls,
-                    "" if uninstalls == 1 else "s",
-                    f", <info>{skipped}</> skipped"
-                    if skipped and self.is_verbose()
-                    else "",
-                )
-            )
+            self._io.write("Package operations: ")
+            self._io.write(f"<info>{installs}</> install{pluralize(installs)}, ")
+            self._io.write(f"<info>{updates}</> update{pluralize(updates)}, ")
+            self._io.write(f"<info>{uninstalls}</> removal{pluralize(uninstalls)}")
+            if skipped and self.is_verbose():
+                self._io.write(f", <info>{skipped}</> skipped")
+            self._io.write_line("")
 
         self._io.write_line("")
 
@@ -419,23 +409,20 @@ class Installer:
         getattr(self, f"_execute_{method}")(operation)
 
     def _execute_install(self, operation: Install) -> None:
+        target = operation.package
         if operation.skipped:
             if self.is_verbose() and (self._execute_operations or self.is_dry_run()):
                 self._io.write_line(
-                    "  - Skipping <c1>{}</c1> (<c2>{}</c2>) {}".format(
-                        operation.package.pretty_name,
-                        operation.package.full_pretty_version,
-                        operation.skip_reason,
-                    )
+                    f"  - Skipping <c1>{target.pretty_name}</c1>"
+                    f" (<c2>{target.full_pretty_version}</c2>) {operation.skip_reason}"
                 )
 
             return
 
         if self._execute_operations or self.is_dry_run():
             self._io.write_line(
-                "  - Installing <c1>{}</c1> (<c2>{}</c2>)".format(
-                    operation.package.pretty_name, operation.package.full_pretty_version
-                )
+                f"  - Installing <c1>{target.pretty_name}</c1>"
+                f" (<c2>{target.full_pretty_version}</c2>)"
             )
 
         if not self._execute_operations:
@@ -450,22 +437,17 @@ class Installer:
         if operation.skipped:
             if self.is_verbose() and (self._execute_operations or self.is_dry_run()):
                 self._io.write_line(
-                    "  - Skipping <c1>{}</c1> (<c2>{}</c2>) {}".format(
-                        target.pretty_name,
-                        target.full_pretty_version,
-                        operation.skip_reason,
-                    )
+                    f"  - Skipping <c1>{target.pretty_name}</c1> "
+                    f"(<c2>{target.full_pretty_version}</c2>) {operation.skip_reason}"
                 )
 
             return
 
         if self._execute_operations or self.is_dry_run():
             self._io.write_line(
-                "  - Updating <c1>{}</c1> (<c2>{}</c2> -> <c2>{}</c2>)".format(
-                    target.pretty_name,
-                    source.full_pretty_version,
-                    target.full_pretty_version,
-                )
+                f"  - Updating <c1>{target.pretty_name}</c1>"
+                f" (<c2>{source.full_pretty_version}</c2> ->"
+                f" <c2>{target.full_pretty_version}</c2>)"
             )
 
         if not self._execute_operations:
@@ -474,23 +456,20 @@ class Installer:
         self._installer.update(source, target)
 
     def _execute_uninstall(self, operation: Uninstall) -> None:
+        target = operation.package
         if operation.skipped:
             if self.is_verbose() and (self._execute_operations or self.is_dry_run()):
                 self._io.write_line(
-                    "  - Not removing <c1>{}</c1> (<c2>{}</c2>) {}".format(
-                        operation.package.pretty_name,
-                        operation.package.full_pretty_version,
-                        operation.skip_reason,
-                    )
+                    f"  - Not removing <c1>{target.pretty_name}</c1>"
+                    f" (<c2>{target.pretty_version}</c2>) {operation.skip_reason}"
                 )
 
             return
 
         if self._execute_operations or self.is_dry_run():
             self._io.write_line(
-                "  - Removing <c1>{}</c1> (<c2>{}</c2>)".format(
-                    operation.package.pretty_name, operation.package.full_pretty_version
-                )
+                f"  - Removing <c1>{target.pretty_name}</c1>"
+                f" (<c2>{target.pretty_version}</c2>)"
             )
 
         if not self._execute_operations:

@@ -154,12 +154,14 @@ VERSION_3_7_1 = Version.parse("3.7.1")
 
 def check_output_wrapper(
     version: Version = VERSION_3_7_1,
-) -> Callable[[List[str], Any, Any], str]:
-    def check_output(cmd: List[str], *args: Any, **kwargs: Any) -> str:
+) -> Callable[[str, Any, Any], str]:
+    def check_output(cmd: str, *args: Any, **kwargs: Any) -> str:
         if "sys.version_info[:3]" in cmd:
             return version.text
         elif "sys.version_info[:2]" in cmd:
             return f"{version.major}.{version.minor}"
+        elif '-c "import sys; print(sys.executable)"' in cmd:
+            return f"/usr/bin/{cmd.split()[0]}"
         else:
             return str(Path("/prefix"))
 
@@ -193,7 +195,7 @@ def test_activate_activates_non_existing_virtualenv_no_envs_file(
 
     m.assert_called_with(
         Path(tmp_dir) / f"{venv_name}-py3.7",
-        executable="python3.7",
+        executable="/usr/bin/python3.7",
         flags={"always-copy": False, "system-site-packages": False},
         with_pip=True,
         with_setuptools=True,
@@ -328,7 +330,7 @@ def test_activate_activates_different_virtualenv_with_envs_file(
 
     m.assert_called_with(
         Path(tmp_dir) / f"{venv_name}-py3.6",
-        executable="python3.6",
+        executable="/usr/bin/python3.6",
         flags={"always-copy": False, "system-site-packages": False},
         with_pip=True,
         with_setuptools=True,
@@ -389,7 +391,7 @@ def test_activate_activates_recreates_for_different_patch(
 
     build_venv_m.assert_called_with(
         Path(tmp_dir) / f"{venv_name}-py3.7",
-        executable="python3.7",
+        executable="/usr/bin/python3.7",
         flags={"always-copy": False, "system-site-packages": False},
         with_pip=True,
         with_setuptools=True,
@@ -470,10 +472,8 @@ def test_deactivate_non_activated_but_existing(
 
     venv_name = manager.generate_env_name("simple-project", str(poetry.file.parent))
 
-    (
-        Path(tmp_dir)
-        / "{}-py{}".format(venv_name, ".".join(str(c) for c in sys.version_info[:2]))
-    ).mkdir()
+    python = ".".join(str(c) for c in sys.version_info[:2])
+    (Path(tmp_dir) / f"{venv_name}-py{python}").mkdir()
 
     config.merge({"virtualenvs": {"path": str(tmp_dir)}})
 
@@ -485,9 +485,7 @@ def test_deactivate_non_activated_but_existing(
     manager.deactivate(NullIO())
     env = manager.get()
 
-    assert env.path == Path(tmp_dir) / "{}-py{}".format(
-        venv_name, ".".join(str(c) for c in sys.version_info[:2])
-    )
+    assert env.path == Path(tmp_dir) / f"{venv_name}-py{python}"
     assert Path("/prefix")
 
 
@@ -502,7 +500,7 @@ def test_deactivate_activated(
         del os.environ["VIRTUAL_ENV"]
 
     venv_name = manager.generate_env_name("simple-project", str(poetry.file.parent))
-    version = Version.parse(".".join(str(c) for c in sys.version_info[:3]))
+    version = Version.from_parts(*sys.version_info[:3])
     other_version = Version.parse("3.4") if version.major == 2 else version.next_minor()
     (Path(tmp_dir) / f"{venv_name}-py{version.major}.{version.minor}").mkdir()
     (
@@ -527,9 +525,7 @@ def test_deactivate_activated(
     manager.deactivate(NullIO())
     env = manager.get()
 
-    assert env.path == Path(tmp_dir) / "{}-py{}.{}".format(
-        venv_name, version.major, version.minor
-    )
+    assert env.path == Path(tmp_dir) / f"{venv_name}-py{version.major}.{version.minor}"
     assert Path("/prefix")
 
     envs = envs_file.read()
@@ -580,8 +576,8 @@ def test_list(tmp_dir: str, manager: EnvManager, poetry: "Poetry", config: "Conf
     venvs = manager.list()
 
     assert len(venvs) == 2
-    assert (Path(tmp_dir) / f"{venv_name}-py3.6") == venvs[0].path
-    assert (Path(tmp_dir) / f"{venv_name}-py3.7") == venvs[1].path
+    assert venvs[0].path == (Path(tmp_dir) / f"{venv_name}-py3.6")
+    assert venvs[1].path == (Path(tmp_dir) / f"{venv_name}-py3.7")
 
 
 def test_remove_by_python_version(
@@ -604,8 +600,9 @@ def test_remove_by_python_version(
 
     venv = manager.remove("3.6")
 
-    assert (Path(tmp_dir) / f"{venv_name}-py3.6") == venv.path
-    assert not (Path(tmp_dir) / f"{venv_name}-py3.6").exists()
+    expected_venv_path = Path(tmp_dir) / f"{venv_name}-py3.6"
+    assert venv.path == expected_venv_path
+    assert not expected_venv_path.exists()
 
 
 def test_remove_by_name(
@@ -628,8 +625,9 @@ def test_remove_by_name(
 
     venv = manager.remove(f"{venv_name}-py3.6")
 
-    assert (Path(tmp_dir) / f"{venv_name}-py3.6") == venv.path
-    assert not (Path(tmp_dir) / f"{venv_name}-py3.6").exists()
+    expected_venv_path = Path(tmp_dir) / f"{venv_name}-py3.6"
+    assert venv.path == expected_venv_path
+    assert not expected_venv_path.exists()
 
 
 def test_remove_also_deactivates(
@@ -657,8 +655,9 @@ def test_remove_also_deactivates(
 
     venv = manager.remove("python3.6")
 
-    assert (Path(tmp_dir) / f"{venv_name}-py3.6") == venv.path
-    assert not (Path(tmp_dir) / f"{venv_name}-py3.6").exists()
+    expected_venv_path = Path(tmp_dir) / f"{venv_name}-py3.6"
+    assert venv.path == expected_venv_path
+    assert not expected_venv_path.exists()
 
     envs = envs_file.read()
     assert venv_name not in envs
@@ -801,7 +800,7 @@ def test_call_no_input_with_called_process_error(
     subprocess.call.assert_called_once()
 
 
-def test_create_venv_tries_to_find_a_compatible_python_executable_using_generic_ones_first(
+def test_create_venv_tries_to_find_a_compatible_python_executable_using_generic_ones_first(  # noqa: E501
     manager: EnvManager,
     poetry: "Poetry",
     config: "Config",
@@ -888,7 +887,7 @@ def test_create_venv_fails_if_no_compatible_python_version_could_be_found(
         'via the "env use" command.'
     )
 
-    assert expected_message == str(e.value)
+    assert str(e.value) == expected_message
     assert m.call_count == 0
 
 
@@ -914,7 +913,7 @@ def test_create_venv_does_not_try_to_find_compatible_versions_with_executable(
         "specified in the pyproject.toml file."
     )
 
-    assert expected_message == str(e.value)
+    assert str(e.value) == expected_message
     assert m.call_count == 0
 
 
@@ -928,9 +927,9 @@ def test_create_venv_uses_patch_version_to_detect_compatibility(
     if "VIRTUAL_ENV" in os.environ:
         del os.environ["VIRTUAL_ENV"]
 
-    version = Version.parse(".".join(str(c) for c in sys.version_info[:3]))
-    poetry.package.python_versions = "^{}".format(
-        ".".join(str(c) for c in sys.version_info[:3])
+    version = Version.from_parts(*sys.version_info[:3])
+    poetry.package.python_versions = "^" + ".".join(
+        str(c) for c in sys.version_info[:3]
     )
     venv_name = manager.generate_env_name("simple-project", str(poetry.file.parent))
 
@@ -966,10 +965,8 @@ def test_create_venv_uses_patch_version_to_detect_compatibility_with_executable(
     if "VIRTUAL_ENV" in os.environ:
         del os.environ["VIRTUAL_ENV"]
 
-    version = Version.parse(".".join(str(c) for c in sys.version_info[:3]))
-    poetry.package.python_versions = "~{}".format(
-        ".".join(str(c) for c in (version.major, version.minor - 1, 0))
-    )
+    version = Version.from_parts(*sys.version_info[:3])
+    poetry.package.python_versions = f"~{version.major}.{version.minor-1}.0"
     venv_name = manager.generate_env_name("simple-project", str(poetry.file.parent))
 
     check_output = mocker.patch(
@@ -1030,7 +1027,7 @@ def test_activate_with_in_project_setting_does_not_fail_if_no_venvs_dir(
 
     m.assert_called_with(
         poetry.file.parent / ".venv",
-        executable="python3.7",
+        executable="/usr/bin/python3.7",
         flags={"always-copy": False, "system-site-packages": False},
         with_pip=True,
         with_setuptools=True,
@@ -1087,16 +1084,10 @@ def test_env_finds_the_correct_executables(tmp_dir: str, manager: EnvManager):
     manager.build_venv(str(venv_path), with_pip=True)
     venv = VirtualEnv(venv_path)
 
-    default_executable = expected_executable = "python" + (".exe" if WINDOWS else "")
-    default_pip_executable = expected_pip_executable = "pip" + (
-        ".exe" if WINDOWS else ""
-    )
-    major_executable = "python{}{}".format(
-        sys.version_info[0], ".exe" if WINDOWS else ""
-    )
-    major_pip_executable = "pip{}{}".format(
-        sys.version_info[0], ".exe" if WINDOWS else ""
-    )
+    default_executable = expected_executable = f"python{'.exe' if WINDOWS else ''}"
+    default_pip_executable = expected_pip_executable = f"pip{'.exe' if WINDOWS else ''}"
+    major_executable = f"python{sys.version_info[0]}{'.exe' if WINDOWS else ''}"
+    major_pip_executable = f"pip{sys.version_info[0]}{'.exe' if WINDOWS else ''}"
 
     if (
         venv._bin_dir.joinpath(default_executable).exists()
@@ -1130,11 +1121,11 @@ def test_env_finds_the_correct_executables_for_generic_env(
     )
     venv = GenericEnv(parent_venv.path, child_env=VirtualEnv(child_venv_path))
 
-    expected_executable = "python{}.{}{}".format(
-        sys.version_info[0], sys.version_info[1], ".exe" if WINDOWS else ""
+    expected_executable = (
+        f"python{sys.version_info[0]}.{sys.version_info[1]}{'.exe' if WINDOWS else ''}"
     )
-    expected_pip_executable = "pip{}.{}{}".format(
-        sys.version_info[0], sys.version_info[1], ".exe" if WINDOWS else ""
+    expected_pip_executable = (
+        f"pip{sys.version_info[0]}.{sys.version_info[1]}{'.exe' if WINDOWS else ''}"
     )
 
     if WINDOWS:
@@ -1157,12 +1148,10 @@ def test_env_finds_fallback_executables_for_generic_env(
     )
     venv = GenericEnv(parent_venv.path, child_env=VirtualEnv(child_venv_path))
 
-    default_executable = "python" + (".exe" if WINDOWS else "")
-    major_executable = "python{}{}".format(
-        sys.version_info[0], ".exe" if WINDOWS else ""
-    )
-    minor_executable = "python{}.{}{}".format(
-        sys.version_info[0], sys.version_info[1], ".exe" if WINDOWS else ""
+    default_executable = f"python{'.exe' if WINDOWS else ''}"
+    major_executable = f"python{sys.version_info[0]}{'.exe' if WINDOWS else ''}"
+    minor_executable = (
+        f"python{sys.version_info[0]}.{sys.version_info[1]}{'.exe' if WINDOWS else ''}"
     )
     expected_executable = minor_executable
     if (
@@ -1179,12 +1168,10 @@ def test_env_finds_fallback_executables_for_generic_env(
         venv._bin_dir.joinpath(expected_executable).unlink()
         expected_executable = default_executable
 
-    default_pip_executable = "pip" + (".exe" if WINDOWS else "")
-    major_pip_executable = "pip{}{}".format(
-        sys.version_info[0], ".exe" if WINDOWS else ""
-    )
-    minor_pip_executable = "pip{}.{}{}".format(
-        sys.version_info[0], sys.version_info[1], ".exe" if WINDOWS else ""
+    default_pip_executable = f"pip{'.exe' if WINDOWS else ''}"
+    major_pip_executable = f"pip{sys.version_info[0]}{'.exe' if WINDOWS else ''}"
+    minor_pip_executable = (
+        f"pip{sys.version_info[0]}.{sys.version_info[1]}{'.exe' if WINDOWS else ''}"
     )
     expected_pip_executable = minor_pip_executable
     if (

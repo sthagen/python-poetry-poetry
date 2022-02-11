@@ -104,9 +104,10 @@ def test_package():
     win_inet = package.extras["socks"][0]
     assert win_inet.name == "win-inet-pton"
     assert win_inet.python_versions == "~2.7 || ~2.6"
-    assert str(win_inet.marker) == (
-        'sys_platform == "win32" and (python_version == "2.7" '
-        'or python_version == "2.6") and extra == "socks"'
+    assert (
+        str(win_inet.marker)
+        == 'sys_platform == "win32" and (python_version == "2.7"'
+        ' or python_version == "2.6") and extra == "socks"'
     )
 
 
@@ -199,8 +200,8 @@ def test_pypi_repository_supports_reading_bz2_files():
     }
 
     for name in expected_extras.keys():
-        assert expected_extras[name] == sorted(
-            package.extras[name], key=lambda r: r.name
+        assert (
+            sorted(package.extras[name], key=lambda r: r.name) == expected_extras[name]
         )
 
 

@@ -1,4 +1,5 @@
 import sys
+import textwrap
 
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -132,7 +133,7 @@ bar==4.5.6
 foo==1.2.3
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_standard_packages_and_markers(
@@ -188,7 +189,7 @@ baz==7.8.9 ; sys_platform == "win32"
 foo==1.2.3 ; python_version < "3.7"
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_poetry(tmp_dir: str, poetry: "Poetry"):
@@ -276,8 +277,8 @@ def test_exporter_can_export_requirements_txt_poetry(tmp_dir: str, poetry: "Poet
         content = f.read()
 
     # The dependency graph:
-    # junit-xml 1.9 Creates JUnit XML test result documents that can be read by tools such as Jenkins
-    # └── six *
+    # junit-xml 1.9 Creates JUnit XML test result documents that can be read by tools
+    # └── six *     such as Jenkins
     # poetry 1.1.4 Python dependency management and packaging made easy.
     # ├── keyring >=21.2.0,<22.0.0
     # │   ├── importlib-metadata >=1
@@ -364,11 +365,12 @@ def test_exporter_can_export_requirements_txt_pyinstaller(
         content = f.read()
 
     # Rationale for the results:
-    #  * PyInstaller has an explicit dependency on altgraph, so it must always be installed.
+    #  * PyInstaller has an explicit dependency on altgraph, so it must always be
+    #    installed.
     #  * PyInstaller requires macholib on Darwin, which in turn requires altgraph.
     # The dependency graph:
-    # pyinstaller 4.0 PyInstaller bundles a Python application and all its dependencies into a single package.
-    # ├── altgraph *
+    # pyinstaller 4.0     PyInstaller bundles a Python application and all its
+    # ├── altgraph *      dependencies into a single package.
     # ├── macholib >=1.8 -- only on Darwin
     # │   └── altgraph >=0.15
     expected = {
@@ -453,7 +455,8 @@ def test_exporter_can_export_requirements_txt_with_nested_packages_and_markers(
             "c==7.8.9 ; sys_platform == 'win32' and python_version < '3.7'"
         ),
         "d": Dependency.create_from_pep_508(
-            "d==0.0.1 ; platform_system == 'Windows' and python_version < '3.7' or sys_platform == 'win32' and python_version < '3.7'"
+            "d==0.0.1 ; platform_system == 'Windows' and python_version < '3.7' or"
+            " sys_platform == 'win32' and python_version < '3.7'"
         ),
     }
 
@@ -568,10 +571,10 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
-def test_exporter_can_export_requirements_txt_with_standard_packages_and_hashes_disabled(
+def test_exporter_can_export_requirements_txt_with_standard_packages_and_hashes_disabled(  # noqa: E501
     tmp_dir: str, poetry: "Poetry"
 ):
     poetry.locker.mock_lock_data(
@@ -615,7 +618,7 @@ bar==4.5.6
 foo==1.2.3
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_without_dev_packages_by_default(
@@ -660,7 +663,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_with_dev_packages_if_opted_in(
@@ -707,7 +710,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_without_optional_packages(
@@ -752,7 +755,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 @pytest.mark.parametrize(
@@ -864,7 +867,7 @@ def test_exporter_can_export_requirements_txt_with_git_packages(
 foo @ git+https://github.com/foo/foo.git@123456
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_nested_packages(
@@ -915,7 +918,7 @@ bar==4.5.6
 foo @ git+https://github.com/foo/foo.git@123456
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_nested_packages_cyclic(
@@ -971,7 +974,7 @@ baz==7.8.9
 foo==1.2.3
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_nested_packages_and_multiple_markers(
@@ -1038,13 +1041,26 @@ def test_exporter_can_export_requirements_txt_with_nested_packages_and_multiple_
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    expected = """\
-bar==7.8.9 ; platform_system != "Windows" or platform_system == "Windows"
-baz==10.11.13 ; platform_system == "Windows"
-foo==1.2.3
-"""
+    expected = (
+        # expectation for poetry-core <= 1.1.0a6
+        textwrap.dedent(
+            """\
+            bar==7.8.9 ; platform_system != "Windows" or platform_system == "Windows"
+            baz==10.11.13 ; platform_system == "Windows"
+            foo==1.2.3
+            """
+        ),
+        # expectation for poetry-core > 1.1.0a6
+        textwrap.dedent(
+            """\
+            bar==7.8.9
+            baz==10.11.13 ; platform_system == "Windows"
+            foo==1.2.3
+            """
+        ),
+    )
 
-    assert expected == content
+    assert content in expected
 
 
 def test_exporter_can_export_requirements_txt_with_git_packages_and_markers(
@@ -1087,7 +1103,7 @@ def test_exporter_can_export_requirements_txt_with_git_packages_and_markers(
 foo @ git+https://github.com/foo/foo.git@123456 ; python_version < "3.7"
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_directory_packages(
@@ -1125,13 +1141,11 @@ def test_exporter_can_export_requirements_txt_with_directory_packages(
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    expected = """\
-foo @ {}/tests/fixtures/sample_project
-""".format(
-        working_directory.as_uri()
-    )
+    expected = f"""\
+foo @ {working_directory.as_uri()}/tests/fixtures/sample_project
+"""
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_nested_directory_packages(
@@ -1160,7 +1174,7 @@ def test_exporter_can_export_requirements_txt_with_nested_directory_packages(
                     "python-versions": "*",
                     "source": {
                         "type": "directory",
-                        "url": "tests/fixtures/sample_project/../project_with_nested_local/bar",
+                        "url": "tests/fixtures/sample_project/../project_with_nested_local/bar",  # noqa: E501
                         "reference": "",
                     },
                 },
@@ -1172,7 +1186,7 @@ def test_exporter_can_export_requirements_txt_with_nested_directory_packages(
                     "python-versions": "*",
                     "source": {
                         "type": "directory",
-                        "url": "tests/fixtures/sample_project/../project_with_nested_local/bar/..",
+                        "url": "tests/fixtures/sample_project/../project_with_nested_local/bar/..",  # noqa: E501
                         "reference": "",
                     },
                 },
@@ -1193,17 +1207,13 @@ def test_exporter_can_export_requirements_txt_with_nested_directory_packages(
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    expected = """\
-bar @ {}/tests/fixtures/project_with_nested_local/bar
-baz @ {}/tests/fixtures/project_with_nested_local
-foo @ {}/tests/fixtures/sample_project
-""".format(
-        working_directory.as_uri(),
-        working_directory.as_uri(),
-        working_directory.as_uri(),
-    )
+    expected = f"""\
+bar @ {working_directory.as_uri()}/tests/fixtures/project_with_nested_local/bar
+baz @ {working_directory.as_uri()}/tests/fixtures/project_with_nested_local
+foo @ {working_directory.as_uri()}/tests/fixtures/sample_project
+"""
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_directory_packages_and_markers(
@@ -1242,13 +1252,12 @@ def test_exporter_can_export_requirements_txt_with_directory_packages_and_marker
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    expected = """\
-foo @ {}/tests/fixtures/sample_project ; python_version < "3.7"
-""".format(
-        working_directory.as_uri()
-    )
+    expected = f"""\
+foo @ {working_directory.as_uri()}/tests/fixtures/sample_project\
+ ; python_version < "3.7"
+"""
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_file_packages(
@@ -1286,13 +1295,11 @@ def test_exporter_can_export_requirements_txt_with_file_packages(
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    expected = """\
-foo @ {}/tests/fixtures/distributions/demo-0.1.0.tar.gz
-""".format(
-        working_directory.as_uri()
-    )
+    expected = f"""\
+foo @ {working_directory.as_uri()}/tests/fixtures/distributions/demo-0.1.0.tar.gz
+"""
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_can_export_requirements_txt_with_file_packages_and_markers(
@@ -1331,13 +1338,12 @@ def test_exporter_can_export_requirements_txt_with_file_packages_and_markers(
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    expected = """\
-foo @ {}/tests/fixtures/distributions/demo-0.1.0.tar.gz ; python_version < "3.7"
-""".format(
-        working_directory.as_uri()
-    )
+    expected = f"""\
+foo @ {working_directory.as_uri()}/tests/fixtures/distributions/demo-0.1.0.tar.gz\
+ ; python_version < "3.7"
+"""
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_with_legacy_packages(
@@ -1397,7 +1403,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_with_url_false(
@@ -1457,7 +1463,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_with_legacy_packages_trusted_host(
@@ -1508,7 +1514,7 @@ bar==4.5.6 \\
     --hash=sha256:67890
 """
 
-    assert expected == content
+    assert content == expected
 
 
 @pytest.mark.parametrize(
@@ -1570,7 +1576,7 @@ def test_exporter_exports_requirements_txt_with_dev_extras(
     with (Path(tmp_dir) / "requirements.txt").open(encoding="utf-8") as f:
         content = f.read()
 
-    assert content == "{}\n".format("\n".join(expected))
+    assert content == "\n".join(expected) + "\n"
 
 
 def test_exporter_exports_requirements_txt_with_legacy_packages_and_duplicate_sources(
@@ -1656,7 +1662,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_with_legacy_packages_and_credentials(
@@ -1725,7 +1731,7 @@ foo==1.2.3 \\
     --hash=sha256:12345
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_exporter_exports_requirements_txt_to_standard_output(

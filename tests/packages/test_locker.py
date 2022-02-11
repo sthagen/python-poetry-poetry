@@ -103,7 +103,7 @@ B = []
 git-package = []
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_locker_properly_loads_extras(locker: Locker):
@@ -307,7 +307,7 @@ content-hash = "178f2cd01dc40e96be23a4a0ae1094816626346346618335e5ff4f0b2c0c5831
 A = []
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_lock_file_should_not_have_mixed_types(locker: Locker, root: ProjectPackage):
@@ -350,7 +350,7 @@ A = []
     with locker.lock.open(encoding="utf-8") as f:
         content = f.read()
 
-    assert expected == content
+    assert content == expected
 
 
 def test_reading_lock_file_should_raise_an_error_on_invalid_data(locker: Locker):
@@ -424,24 +424,21 @@ content-hash = "178f2cd01dc40e96be23a4a0ae1094816626346346618335e5ff4f0b2c0c5831
 A = []
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_locker_should_emit_warnings_if_lock_version_is_newer_but_allowed(
     locker: Locker, caplog: "LogCaptureFixture"
 ):
-    content = """\
+    version = ".".join(Version.parse(Locker._VERSION).next_minor().text.split(".")[:2])
+    content = f"""\
 [metadata]
 lock-version = "{version}"
 python-versions = "~2.7 || ^3.4"
 content-hash = "c3d07fca33fba542ef2b2a4d75bf5b48d892d21a830e2ad9c952ba5123a52f77"
 
 [metadata.files]
-""".format(
-        version=".".join(
-            Version.parse(Locker._VERSION).next_minor().text.split(".")[:2]
-        )
-    )
+"""
     caplog.set_level(logging.WARNING, logger="poetry.packages.locker")
 
     locker.lock.write(tomlkit.parse(content))
@@ -458,7 +455,7 @@ The lock file might not be compatible with the current version of Poetry.
 Upgrade Poetry to ensure the lock file is read properly or, alternatively, \
 regenerate the lock file with the `poetry lock` command.\
 """
-    assert expected == record.message
+    assert record.message == expected
 
 
 def test_locker_should_raise_an_error_if_lock_version_is_newer_and_not_allowed(
@@ -514,26 +511,24 @@ A = []
     with locker.lock.open(encoding="utf-8") as f:
         content = f.read()
 
-    assert expected == content
+    assert content == expected
 
 
-def test_locker_should_neither_emit_warnings_nor_raise_error_for_lower_compatible_versions(
+def test_locker_should_neither_emit_warnings_nor_raise_error_for_lower_compatible_versions(  # noqa: E501
     locker: Locker, caplog: "LogCaptureFixture"
 ):
     current_version = Version.parse(Locker._VERSION)
     older_version = ".".join(
         [str(current_version.major), str(current_version.minor - 1)]
     )
-    content = """\
+    content = f"""\
 [metadata]
-lock-version = "{version}"
+lock-version = "{older_version}"
 python-versions = "~2.7 || ^3.4"
 content-hash = "c3d07fca33fba542ef2b2a4d75bf5b48d892d21a830e2ad9c952ba5123a52f77"
 
 [metadata.files]
-""".format(
-        version=older_version
-    )
+"""
     caplog.set_level(logging.WARNING, logger="poetry.packages.locker")
 
     locker.lock.write(tomlkit.parse(content))
@@ -607,7 +602,7 @@ content-hash = "178f2cd01dc40e96be23a4a0ae1094816626346346618335e5ff4f0b2c0c5831
 A = []
 """
 
-    assert expected == content
+    assert content == expected
 
 
 def test_locked_repository_uses_root_dir_of_package(

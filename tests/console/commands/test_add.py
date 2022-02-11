@@ -58,13 +58,60 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
 
     assert "cachy" in content["dependencies"]
     assert content["dependencies"]["cachy"] == "^0.2.0"
+
+
+def test_add_replace_by_constraint(
+    app: "PoetryTestApplication", repo: "TestRepository", tester: "CommandTester"
+):
+    repo.add_package(get_package("cachy", "0.1.0"))
+    repo.add_package(get_package("cachy", "0.2.0"))
+
+    tester.execute("cachy")
+
+    expected = """\
+Using version ^0.2.0 for cachy
+
+Updating dependencies
+Resolving dependencies...
+
+Writing lock file
+
+Package operations: 1 install, 0 updates, 0 removals
+
+  • Installing cachy (0.2.0)
+"""
+    assert tester.io.fetch_output() == expected
+    assert tester.command.installer.executor.installations_count == 1
+
+    content = app.poetry.file.read()["tool"]["poetry"]
+
+    assert "cachy" in content["dependencies"]
+    assert content["dependencies"]["cachy"] == "^0.2.0"
+
+    tester.execute("cachy@0.1.0")
+    expected = """
+Updating dependencies
+Resolving dependencies...
+
+Writing lock file
+
+Package operations: 1 install, 0 updates, 0 removals
+
+  • Installing cachy (0.1.0)
+"""
+    assert tester.io.fetch_output() == expected
+
+    content = app.poetry.file.read()["tool"]["poetry"]
+
+    assert "cachy" in content["dependencies"]
+    assert content["dependencies"]["cachy"] == "0.1.0"
 
 
 def test_add_no_constraint_editable_error(
@@ -77,12 +124,13 @@ def test_add_no_constraint_editable_error(
     tester.execute("-e cachy")
 
     expected = """
-Failed to add packages. Only vcs/path dependencies support editable installs. cachy is neither.
+Failed to add packages. Only vcs/path dependencies support editable installs.\
+ cachy is neither.
 
 No changes were applied.
 """
     assert tester.status_code == 1
-    assert expected == tester.io.fetch_error()
+    assert tester.io.fetch_error() == expected
     assert tester.command.installer.executor.installations_count == 0
     assert content == app.poetry.file.read()["tool"]["poetry"]
 
@@ -107,7 +155,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.1.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
 
@@ -131,7 +179,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
 
@@ -162,7 +210,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   • Installing cachy (0.1.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
 
@@ -192,7 +240,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
 
@@ -222,7 +270,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   • Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -258,7 +306,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   • Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
 
@@ -291,7 +339,7 @@ Package operations: 4 installs, 0 updates, 0 removals
   • Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected.strip() == tester.io.fetch_output().strip()
+    assert tester.io.fetch_output().strip() == expected.strip()
     assert tester.command.installer.executor.installations_count == 4
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -332,7 +380,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   • Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -366,7 +414,7 @@ def test_add_directory_constraint(
     path = "../git/github.com/demo/demo"
     tester.execute(f"{path}" if not editable else f"-e {path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -376,12 +424,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   • Installing pendulum (1.4.4)
-  • Installing demo (0.1.2 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  • Installing demo (0.1.2 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -409,7 +455,7 @@ def test_add_directory_with_poetry(
     path = "../git/github.com/demo/pyproject-demo"
     tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -419,12 +465,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   • Installing pendulum (1.4.4)
-  • Installing demo (0.1.2 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  • Installing demo (0.1.2 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
 
@@ -443,7 +487,7 @@ def test_add_file_constraint_wheel(
     path = "../distributions/demo-0.1.0-py2.py3-none-any.whl"
     tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -453,12 +497,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   • Installing pendulum (1.4.4)
-  • Installing demo (0.1.0 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  • Installing demo (0.1.0 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -483,7 +525,7 @@ def test_add_file_constraint_sdist(
     path = "../distributions/demo-0.1.0.tar.gz"
     tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -493,12 +535,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   • Installing pendulum (1.4.4)
-  • Installing demo (0.1.0 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  • Installing demo (0.1.0 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -536,7 +576,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -573,10 +613,11 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   • Installing pendulum (1.4.4)
-  • Installing demo (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
+  • Installing demo\
+ (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 2
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -598,7 +639,8 @@ def test_add_url_constraint_wheel_with_extras(
     repo.add_package(get_package("tomlkit", "0.5.5"))
 
     tester.execute(
-        "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl[foo,bar]"
+        "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl"
+        "[foo,bar]"
     )
 
     expected = """\
@@ -613,19 +655,22 @@ Package operations: 4 installs, 0 updates, 0 removals
   • Installing cleo (0.6.5)
   • Installing pendulum (1.4.4)
   • Installing tomlkit (0.5.5)
-  • Installing demo (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
+  • Installing demo\
+ (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
 """
     # Order might be different, split into lines and compare the overall output.
     expected = set(expected.splitlines())
     output = set(tester.io.fetch_output().splitlines())
-    assert expected == output
+    assert output == expected
     assert tester.command.installer.executor.installations_count == 4
 
     content = app.poetry.file.read()["tool"]["poetry"]
 
     assert "demo" in content["dependencies"]
     assert content["dependencies"]["demo"] == {
-        "url": "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl",
+        "url": (
+            "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl"
+        ),
         "extras": ["foo", "bar"],
     }
 
@@ -652,7 +697,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -689,7 +734,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -724,7 +769,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -786,7 +831,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -827,7 +872,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing cachy (0.2.0)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -857,7 +902,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing pyyaml (3.13)
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert tester.command.installer.executor.installations_count == 1
 
     content = app.poetry.file.read()["tool"]["poetry"]
@@ -881,8 +926,10 @@ The following packages are already present in the pyproject.toml and will be ski
 
   • foo
 
-If you want to update it to the latest compatible version, you can use `poetry update package`.
-If you prefer to upgrade it to the latest available version, you can use `poetry add package@latest`.
+If you want to update it to the latest compatible version,\
+ you can use `poetry update package`.
+If you prefer to upgrade it to the latest available version,\
+ you can use `poetry add package@latest`.
 """
 
     assert expected in tester.io.fetch_output()
@@ -985,7 +1032,7 @@ Resolving dependencies...
 Writing lock file
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
     assert content_hash != app.poetry.locker.lock_data["metadata"]["content-hash"]
 
 
@@ -1013,7 +1060,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1046,7 +1093,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.1.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1074,7 +1121,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1109,7 +1156,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   - Installing cachy (0.1.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1143,7 +1190,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1172,7 +1219,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   - Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1207,7 +1254,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   - Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1239,7 +1286,7 @@ Package operations: 4 installs, 0 updates, 0 removals
   - Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 4
 
@@ -1276,7 +1323,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   - Installing demo (0.1.2 9cf87a2)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1305,7 +1352,7 @@ def test_add_directory_constraint_old_installer(
     path = "../git/github.com/demo/demo"
     old_tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -1315,12 +1362,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   - Installing pendulum (1.4.4)
-  - Installing demo (0.1.2 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  - Installing demo (0.1.2 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1345,7 +1390,7 @@ def test_add_directory_with_poetry_old_installer(
     path = "../git/github.com/demo/pyproject-demo"
     old_tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -1355,12 +1400,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   - Installing pendulum (1.4.4)
-  - Installing demo (0.1.2 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  - Installing demo (0.1.2 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1380,7 +1423,7 @@ def test_add_file_constraint_wheel_old_installer(
     path = "../distributions/demo-0.1.0-py2.py3-none-any.whl"
     old_tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -1390,12 +1433,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   - Installing pendulum (1.4.4)
-  - Installing demo (0.1.0 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  - Installing demo (0.1.0 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1422,7 +1463,7 @@ def test_add_file_constraint_sdist_old_installer(
     path = "../distributions/demo-0.1.0.tar.gz"
     old_tester.execute(f"{path}")
 
-    expected = """\
+    expected = f"""\
 
 Updating dependencies
 Resolving dependencies...
@@ -1432,12 +1473,10 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   - Installing pendulum (1.4.4)
-  - Installing demo (0.1.0 {})
-""".format(
-        app.poetry.file.parent.joinpath(path).resolve().as_posix()
-    )
+  - Installing demo (0.1.0 {app.poetry.file.parent.joinpath(path).resolve().as_posix()})
+"""
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1479,7 +1518,7 @@ Package operations: 2 installs, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1518,10 +1557,11 @@ Writing lock file
 Package operations: 2 installs, 0 updates, 0 removals
 
   - Installing pendulum (1.4.4)
-  - Installing demo (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
+  - Installing demo\
+ (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 2
 
@@ -1544,7 +1584,8 @@ def test_add_url_constraint_wheel_with_extras_old_installer(
     repo.add_package(get_package("tomlkit", "0.5.5"))
 
     old_tester.execute(
-        "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl[foo,bar]"
+        "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl"
+        "[foo,bar]"
     )
 
     expected = """\
@@ -1559,10 +1600,11 @@ Package operations: 4 installs, 0 updates, 0 removals
   - Installing cleo (0.6.5)
   - Installing pendulum (1.4.4)
   - Installing tomlkit (0.5.5)
-  - Installing demo (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
+  - Installing demo\
+ (0.1.0 https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 4
 
@@ -1570,7 +1612,9 @@ Package operations: 4 installs, 0 updates, 0 removals
 
     assert "demo" in content["dependencies"]
     assert content["dependencies"]["demo"] == {
-        "url": "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl",
+        "url": (
+            "https://python-poetry.org/distributions/demo-0.1.0-py2.py3-none-any.whl"
+        ),
         "extras": ["foo", "bar"],
     }
 
@@ -1600,7 +1644,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1639,7 +1683,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1678,7 +1722,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1744,7 +1788,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing cachy (0.2.0)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1778,7 +1822,7 @@ Package operations: 1 install, 0 updates, 0 removals
   - Installing pyyaml (3.13)
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
     assert len(installer.installs) == 1
 
@@ -1807,14 +1851,16 @@ The following packages are already present in the pyproject.toml and will be ski
 
   • foo
 
-If you want to update it to the latest compatible version, you can use `poetry update package`.
-If you prefer to upgrade it to the latest available version, you can use `poetry add package@latest`.
+If you want to update it to the latest compatible version,\
+ you can use `poetry update package`.
+If you prefer to upgrade it to the latest available version,\
+ you can use `poetry add package@latest`.
 """
 
     assert expected in old_tester.io.fetch_output()
 
 
-def test_add_should_work_when_adding_existing_package_with_latest_constraint_old_installer(
+def test_add_should_work_when_adding_existing_package_with_latest_constraint_old_installer(  # noqa: E501
     app: "PoetryTestApplication",
     repo: "TestRepository",
     installer: "NoopInstaller",
@@ -1922,7 +1968,7 @@ Resolving dependencies...
 Writing lock file
 """
 
-    assert expected == old_tester.io.fetch_output()
+    assert old_tester.io.fetch_output() == expected
 
 
 def test_add_keyboard_interrupt_restore_content(

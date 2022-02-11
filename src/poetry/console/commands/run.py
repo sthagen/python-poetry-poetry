@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Dict
 from typing import Union
 
 from cleo.helpers import argument
@@ -41,7 +42,7 @@ class RunCommand(EnvCommand):
 
         return module
 
-    def run_script(self, script: Union[str, dict], args: str) -> Any:
+    def run_script(self, script: Union[str, Dict[str, str]], args: str) -> Any:
         if isinstance(script, dict):
             script = script["callable"]
 
@@ -54,8 +55,8 @@ class RunCommand(EnvCommand):
         cmd += [
             "import sys; "
             "from importlib import import_module; "
-            "sys.argv = {!r}; {}"
-            "import_module('{}').{}()".format(args, src_in_sys_path, module, callable_)
+            f"sys.argv = {args!r}; {src_in_sys_path}"
+            f"import_module('{module}').{callable_}()"
         ]
 
         return self.env.execute(*cmd)

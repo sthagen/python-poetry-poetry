@@ -85,14 +85,13 @@ class Chooser:
         return chosen
 
     def _get_links(self, package: "Package") -> List["Link"]:
-        if not package.source_type:
-            if not self._pool.has_repository("pypi"):
-                repository = self._pool.repositories[0]
-            else:
-                repository = self._pool.repository("pypi")
-        else:
+        if package.source_type:
             repository = self._pool.repository(package.source_reference)
 
+        elif not self._pool.has_repository("pypi"):
+            repository = self._pool.repositories[0]
+        else:
+            repository = self._pool.repository("pypi")
         links = repository.find_links_for_package(package)
 
         hashes = [f["hash"] for f in package.files]
@@ -113,7 +112,8 @@ class Chooser:
 
         if links and not selected_links:
             raise RuntimeError(
-                f"Retrieved digest for link {link.filename}({h}) not in poetry.lock metadata {hashes}"
+                f"Retrieved digest for link {link.filename}({h}) not in poetry.lock"
+                f" metadata {hashes}"
             )
 
         return selected_links
@@ -142,15 +142,14 @@ class Chooser:
               comparison operators, but then different sdist links
               with the same version, would have to be considered equal
         """
-        support_num = len(self._env.supported_tags)
         build_tag = ()
         binary_preference = 0
         if link.is_wheel:
             wheel = Wheel(link.filename)
             if not wheel.is_supported_by_environment(self._env):
                 raise RuntimeError(
-                    "{} is not a supported wheel for this platform. It "
-                    "can't be sorted.".format(wheel.filename)
+                    f"{wheel.filename} is not a supported wheel for this platform. It "
+                    "can't be sorted."
                 )
 
             # TODO: Binary preference
@@ -160,6 +159,7 @@ class Chooser:
                 build_tag_groups = match.groups()
                 build_tag = (int(build_tag_groups[0]), build_tag_groups[1])
         else:  # sdist
+            support_num = len(self._env.supported_tags)
             pri = -support_num
 
         has_allowed_hash = int(self._is_link_hash_allowed_for_package(link, package))

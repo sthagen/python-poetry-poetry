@@ -96,7 +96,7 @@ pendulum 2.0.0 Pendulum package
 pytest   3.7.3 Pytest package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_basic_with_installed_packages_single(
@@ -194,7 +194,7 @@ cachy        0.1.0 Cachy package
 pendulum (!) 2.0.0 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_basic_with_not_installed_packages_decorated(
@@ -250,7 +250,7 @@ def test_show_basic_with_not_installed_packages_decorated(
 \033[31mpendulum\033[39m \033[39;1m2.0.0\033[39;22m Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_latest_non_decorated(
@@ -320,7 +320,7 @@ cachy    0.1.0 0.2.0 Cachy package
 pendulum 2.0.0 2.0.1 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_latest_decorated(
@@ -386,11 +386,13 @@ def test_show_latest_decorated(
     tester.execute("--latest", decorated=True)
 
     expected = """\
-\033[36mcachy   \033[39m \033[39;1m0.1.0\033[39;22m \033[33m0.2.0\033[39m Cachy package
-\033[36mpendulum\033[39m \033[39;1m2.0.0\033[39;22m \033[31m2.0.1\033[39m Pendulum package
+\033[36mcachy   \033[39m \033[39;1m0.1.0\033[39;22m\
+ \033[33m0.2.0\033[39m Cachy package
+\033[36mpendulum\033[39m \033[39;1m2.0.0\033[39;22m\
+ \033[31m2.0.1\033[39m Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_outdated(
@@ -456,7 +458,7 @@ def test_show_outdated(
 cachy 0.1.0 0.2.0 Cachy package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_outdated_with_only_up_to_date_packages(
@@ -498,7 +500,7 @@ def test_show_outdated_with_only_up_to_date_packages(
 
     expected = ""
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_outdated_has_prerelease_but_not_allowed(
@@ -569,7 +571,7 @@ def test_show_outdated_has_prerelease_but_not_allowed(
 cachy 0.1.0 0.2.0 Cachy package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_outdated_has_prerelease_and_allowed(
@@ -644,7 +646,7 @@ def test_show_outdated_has_prerelease_and_allowed(
 cachy 0.1.0.dev1 0.3.0.dev123 Cachy package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_outdated_formatting(
@@ -714,7 +716,7 @@ cachy    0.1.0 0.2.0 Cachy package
 pendulum 2.0.0 2.0.1 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 @pytest.mark.parametrize("project_directory", ["project_with_local_dependencies"])
@@ -827,8 +829,9 @@ def test_show_outdated_local_dependencies(
 cachy              0.2.0                       0.3.0
 project-with-setup 0.1.1 ../project_with_setup 0.1.2 ../project_with_setup
 """
-    assert expected.rstrip() == "\n".join(
-        line.rstrip() for line in tester.io.fetch_output().splitlines()
+    assert (
+        "\n".join(line.rstrip() for line in tester.io.fetch_output().splitlines())
+        == expected.rstrip()
     )
 
 
@@ -898,7 +901,9 @@ def test_show_outdated_git_dev_dependency(
                     "source": {
                         "type": "git",
                         "reference": "9cf87a285a2d3fbb0b9fa621997b3acc3631ed24",
-                        "resolved_reference": "9cf87a285a2d3fbb0b9fa621997b3acc3631ed24",
+                        "resolved_reference": (
+                            "9cf87a285a2d3fbb0b9fa621997b3acc3631ed24"
+                        ),
                         "url": "https://github.com/demo/demo.git",
                     },
                 },
@@ -929,7 +934,7 @@ cachy 0.1.0         0.2.0         Cachy package
 demo  0.1.1 9cf87a2 0.1.2 9cf87a2 Demo package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 @pytest.mark.parametrize("project_directory", ["project_with_git_dev_dependency"])
@@ -1027,7 +1032,7 @@ def test_show_outdated_no_dev_git_dev_dependency(
 cachy 0.1.0 0.2.0 Cachy package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_hides_incompatible_package(
@@ -1088,7 +1093,7 @@ def test_show_hides_incompatible_package(
 pendulum 2.0.0 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_all_shows_incompatible_package(
@@ -1146,7 +1151,7 @@ cachy     0.1.0 Cachy package
 pendulum  2.0.0 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_non_dev_with_basic_installed_packages(
@@ -1222,7 +1227,7 @@ cachy    0.1.0 Cachy package
 pendulum 2.0.0 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_with_group_only(
@@ -1297,7 +1302,7 @@ def test_show_with_group_only(
 pytest 3.7.3 Pytest package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_with_optional_group(
@@ -1373,7 +1378,7 @@ cachy    0.1.0 Cachy package
 pendulum 2.0.0 Pendulum package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
     tester.execute("--with dev")
 
@@ -1383,7 +1388,7 @@ pendulum 2.0.0 Pendulum package
 pytest   3.7.3 Pytest package
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_tree(tester: "CommandTester", poetry: "Poetry", installed: "Repository"):
@@ -1435,7 +1440,7 @@ cachy 0.2.0
 `-- msgpack-python >=0.5 <0.6
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_tree_no_dev(
@@ -1504,7 +1509,7 @@ cachy 0.2.0
 └── msgpack-python >=0.5 <0.6
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_show_required_by_deps(

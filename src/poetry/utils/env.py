@@ -30,6 +30,7 @@ import packaging.tags
 import tomlkit
 import virtualenv
 
+from cleo.io.outputs.output import Verbosity
 from packaging.tags import Tag
 from packaging.tags import interpreter_name
 from packaging.tags import interpreter_version
@@ -117,7 +118,9 @@ env = {
     "sys_platform": sys.platform,
     "version_info": tuple(sys.version_info),
     # Extra information
-    "interpreter_name": INTERPRETER_SHORT_NAMES.get(implementation_name, implementation_name),
+    "interpreter_name": INTERPRETER_SHORT_NAMES.get(
+        implementation_name, implementation_name
+    ),
     "interpreter_version": interpreter_version(),
 }
 
@@ -141,6 +144,10 @@ import sys
 
 print('.'.join([str(s) for s in sys.version_info[:3]]))
 """
+
+GET_PYTHON_VERSION_ONELINER = (
+    "\"import sys; print('.'.join([str(s) for s in sys.version_info[:3]]))\""
+)
 
 GET_SYS_PATH = """\
 import json
@@ -253,20 +260,17 @@ class SitePackages:
                     return [path]
                 except ValueError:
                     pass
-            else:
-                raise ValueError(
-                    "{} is not relative to any discovered {}sites".format(
-                        path, "writable " if writable_only else ""
-                    )
-                )
+            site_type = "writable " if writable_only else ""
+            raise ValueError(
+                f"{path} is not relative to any discovered {site_type}sites"
+            )
 
         results = [candidate / path for candidate in candidates if candidate]
 
         if not results and strict:
             raise RuntimeError(
-                'Unable to find a suitable destination for "{}" in {}'.format(
-                    str(path), paths_csv(self._candidates)
-                )
+                f'Unable to find a suitable destination for "{path}" in'
+                f" {paths_csv(self._candidates)}"
             )
 
         return results
@@ -287,8 +291,7 @@ class SitePackages:
     ) -> Optional[metadata.PathDistribution]:
         for distribution in self.distributions(name=name, writable_only=writable_only):
             return distribution
-        else:
-            return None
+        return None
 
     def find_distribution_files_with_suffix(
         self, distribution_name: str, suffix: str, writable_only: bool = False
@@ -421,8 +424,9 @@ class EnvCommandError(EnvError):
     def __init__(self, e: CalledProcessError, input: Optional[str] = None) -> None:
         self.e = e
 
-        message = "Command {} errored with the following return code {}, and output: \n{}".format(
-            e.cmd, e.returncode, decode(e.output)
+        message = (
+            f"Command {e.cmd} errored with the following return code {e.returncode},"
+            f" and output: \n{decode(e.output)}"
         )
         if input:
             message += f"input was : {input}"
@@ -433,11 +437,11 @@ class NoCompatiblePythonVersionFound(EnvError):
     def __init__(self, expected: str, given: Optional[str] = None) -> None:
         if given:
             message = (
-                "The specified Python version ({}) "
-                "is not supported by the project ({}).\n"
+                f"The specified Python version ({given}) "
+                f"is not supported by the project ({expected}).\n"
                 "Please choose a compatible version "
                 "or loosen the python constraint specified "
-                "in the pyproject.toml file.".format(given, expected)
+                "in the pyproject.toml file."
             )
         else:
             message = (
@@ -461,6 +465,40 @@ class EnvManager:
     def __init__(self, poetry: "Poetry") -> None:
         self._poetry = poetry
 
+    def _full_python_path(self, python: str) -> str:
+        try:
+            executable = decode(
+                subprocess.check_output(
+                    list_to_shell_command(
+                        [python, "-c", '"import sys; print(sys.executable)"']
+                    ),
+                    shell=True,
+                ).strip()
+            )
+        except CalledProcessError as e:
+            raise EnvCommandError(e)
+
+        return executable
+
+    def _detect_active_python(self, io: "IO") -> str:
+        executable = None
+
+        try:
+            io.write_line(
+                "Trying to detect current active python executable as specified in the"
+                " config.",
+                verbosity=Verbosity.VERBOSE,
+            )
+            executable = self._full_python_path("python")
+            io.write_line(f"Found: {executable}", verbosity=Verbosity.VERBOSE)
+        except CalledProcessError:
+            io.write_line(
+                "Unable to detect the current active python executable. Falling back to"
+                " default.",
+                verbosity=Verbosity.VERBOSE,
+            )
+        return executable
+
     def activate(self, python: str, io: "IO") -> "Env":
         venv_path = self._poetry.config.get("virtualenvs.path")
         if venv_path is None:
@@ -481,16 +519,12 @@ class EnvManager:
             # Executable in PATH or full executable path
             pass
 
+        python = self._full_python_path(python)
+
         try:
             python_version = decode(
                 subprocess.check_output(
-                    list_to_shell_command(
-                        [
-                            python,
-                            "-c",
-                            "\"import sys; print('.'.join([str(s) for s in sys.version_info[:3]]))\"",
-                        ]
-                    ),
+                    list_to_shell_command([python, "-c", GET_PYTHON_VERSION_ONELINER]),
                     shell=True,
                 )
             )
@@ -573,11 +607,8 @@ class EnvManager:
             envs = envs_file.read()
             env = envs.get(name)
             if env is not None:
-                io.write_line(
-                    "Deactivating virtualenv: <comment>{}</comment>".format(
-                        venv_path / (name + "-py{}".format(env["minor"]))
-                    )
-                )
+                venv = venv_path / f"{name}-py{env['minor']}"
+                io.write_line(f"Deactivating virtualenv: <comment>{venv}</comment>")
                 del envs[name]
 
                 envs_file.write(envs)
@@ -733,13 +764,7 @@ class EnvManager:
         try:
             python_version = decode(
                 subprocess.check_output(
-                    list_to_shell_command(
-                        [
-                            python,
-                            "-c",
-                            "\"import sys; print('.'.join([str(s) for s in sys.version_info[:3]]))\"",
-                        ]
-                    ),
+                    list_to_shell_command([python, "-c", GET_PYTHON_VERSION_ONELINER]),
                     shell=True,
                 )
             )
@@ -792,6 +817,12 @@ class EnvManager:
         create_venv = self._poetry.config.get("virtualenvs.create")
         root_venv = self._poetry.config.get("virtualenvs.in-project")
         venv_path = self._poetry.config.get("virtualenvs.path")
+        prefer_active_python = self._poetry.config.get(
+            "virtualenvs.prefer-active-python"
+        )
+
+        if not executable and prefer_active_python:
+            executable = self._detect_active_python(io)
 
         if root_venv:
             venv_path = cwd / ".venv"
@@ -809,11 +840,7 @@ class EnvManager:
             python_patch = decode(
                 subprocess.check_output(
                     list_to_shell_command(
-                        [
-                            executable,
-                            "-c",
-                            "\"import sys; print('.'.join([str(s) for s in sys.version_info[:3]]))\"",
-                        ]
+                        [executable, "-c", GET_PYTHON_VERSION_ONELINER]
                     ),
                     shell=True,
                 ).strip()
@@ -828,17 +855,15 @@ class EnvManager:
             # If an executable has been specified, we stop there
             # and notify the user of the incompatibility.
             # Otherwise, we try to find a compatible Python version.
-            if executable:
+            if executable and not prefer_active_python:
                 raise NoCompatiblePythonVersionFound(
                     self._poetry.package.python_versions, python_patch
                 )
 
             io.write_line(
-                "<warning>The currently activated Python version {} "
-                "is not supported by the project ({}).\n"
-                "Trying to find and use a compatible version.</warning> ".format(
-                    python_patch, self._poetry.package.python_versions
-                )
+                f"<warning>The currently activated Python version {python_patch} is not"
+                f" supported by the project ({self._poetry.package.python_versions}).\n"
+                "Trying to find and use a compatible version.</warning> "
             )
 
             for python_to_try in sorted(
@@ -865,11 +890,7 @@ class EnvManager:
                     python_patch = decode(
                         subprocess.check_output(
                             list_to_shell_command(
-                                [
-                                    python,
-                                    "-c",
-                                    "\"import sys; print('.'.join([str(s) for s in sys.version_info[:3]]))\"",
-                                ]
+                                [python, "-c", GET_PYTHON_VERSION_ONELINER]
                             ),
                             stderr=subprocess.STDOUT,
                             shell=True,
@@ -910,17 +931,16 @@ class EnvManager:
 
                 return self.get_system_env()
 
-            io.write_line(f"Creating virtualenv <c1>{name}</> in {str(venv_path)}")
+            io.write_line(f"Creating virtualenv <c1>{name}</> in {venv_path!s}")
         else:
             create_venv = False
             if force:
                 if not env.is_sane():
                     io.write_line(
-                        "<warning>The virtual environment found in {} seems to be broken.</warning>".format(
-                            env.path
-                        )
+                        f"<warning>The virtual environment found in {env.path} seems to"
+                        " be broken.</warning>"
                     )
-                io.write_line(f"Recreating virtualenv <c1>{name}</> in {str(venv)}")
+                io.write_line(f"Recreating virtualenv <c1>{name}</> in {venv!s}")
                 self.remove_venv(venv)
                 create_venv = True
             elif io.is_very_verbose():
@@ -979,7 +999,8 @@ class EnvManager:
             else flags.pop("no-setuptools", True)
         )
 
-        # we want wheels to be enabled when pip is required and it has not been explicitly disabled
+        # we want wheels to be enabled when pip is required and it has not been
+        # explicitly disabled
         flags["no-wheel"] = (
             not with_wheel
             if with_wheel is not None
@@ -1087,6 +1108,7 @@ class Env:
     def __init__(self, path: Path, base: Optional[Path] = None) -> None:
         self._is_windows = sys.platform == "win32"
         self._is_mingw = sysconfig.get_platform().startswith("mingw")
+        self._is_conda = bool(os.environ.get("CONDA_DEFAULT_ENV"))
 
         if not self._is_windows or self._is_mingw:
             bin_dir = "bin"
@@ -1147,10 +1169,15 @@ class Env:
     def parent_env(self) -> "GenericEnv":
         return GenericEnv(self.base, child_env=self)
 
-    def find_executables(self) -> None:
+    def _find_python_executable(self) -> None:
+        bin_dir = self._bin_dir
+
+        if self._is_windows and self._is_conda:
+            bin_dir = self._path
+
         python_executables = sorted(
             p.name
-            for p in self._bin_dir.glob("python*")
+            for p in bin_dir.glob("python*")
             if re.match(r"python(?:\d+(?:\.\d+)?)?(?:\.exe)?$", p.name)
         )
         if python_executables:
@@ -1160,6 +1187,7 @@ class Env:
 
             self._executable = executable
 
+    def _find_pip_executable(self) -> None:
         pip_executables = sorted(
             p.name
             for p in self._bin_dir.glob("pip*")
@@ -1171,6 +1199,10 @@ class Env:
                 pip_executable = pip_executable[:-4]
 
             self._pip_executable = pip_executable
+
+    def find_executables(self) -> None:
+        self._find_python_executable()
+        self._find_pip_executable()
 
     def get_embedded_wheel(self, distribution: str) -> Path:
         return get_embed_wheel(
@@ -1188,7 +1220,8 @@ class Env:
         """
         Path to current pip executable
         """
-        # we do not use as_posix() here due to issues with windows pathlib2 implementation
+        # we do not use as_posix() here due to issues with windows pathlib2
+        # implementation
         path = self._bin(self._pip_executable)
         if not Path(path).exists():
             return str(self.pip_embedded)
@@ -1345,7 +1378,7 @@ class Env:
         """
         call = kwargs.pop("call", False)
         input_ = kwargs.pop("input_", None)
-        env = kwargs.pop("env", {k: v for k, v in os.environ.items()})
+        env = kwargs.pop("env", dict(os.environ))
 
         try:
             if self._is_windows:
@@ -1376,14 +1409,14 @@ class Env:
 
     def execute(self, bin: str, *args: str, **kwargs: Any) -> Optional[int]:
         command = self.get_command_from_bin(bin) + list(args)
-        env = kwargs.pop("env", {k: v for k, v in os.environ.items()})
+        env = kwargs.pop("env", dict(os.environ))
 
         if not self._is_windows:
             return os.execvpe(command[0], command, env=env)
-        else:
-            exe = subprocess.Popen([command[0]] + command[1:], env=env, **kwargs)
-            exe.communicate()
-            return exe.returncode
+
+        exe = subprocess.Popen([command[0]] + command[1:], env=env, **kwargs)
+        exe.communicate()
+        return exe.returncode
 
     def is_venv(self) -> bool:
         raise NotImplementedError()
@@ -1416,7 +1449,7 @@ class Env:
             # the root of the env path.
             if self._is_windows:
                 if not bin.endswith(".exe"):
-                    bin_path = self._bin_dir / (bin + ".exe")
+                    bin_path = self._path / (bin + ".exe")
                 else:
                     bin_path = self._path / bin
 
@@ -1493,7 +1526,7 @@ class SystemEnv(Env):
     def get_marker_env(self) -> Dict[str, Any]:
         if hasattr(sys, "implementation"):
             info = sys.implementation.version
-            iver = "{0.major}.{0.minor}.{0.micro}".format(info)
+            iver = f"{info.major}.{info.minor}.{info.micro}"
             kind = info.releaselevel
             if kind != "final":
                 iver += kind[0] + str(info.serial)
@@ -1513,12 +1546,9 @@ class SystemEnv(Env):
             "platform_version": platform.version(),
             "python_full_version": platform.python_version(),
             "platform_python_implementation": platform.python_implementation(),
-            "python_version": ".".join(
-                v for v in platform.python_version().split(".")[:2]
-            ),
+            "python_version": ".".join(platform.python_version().split(".")[:2]),
             "sys_platform": sys.platform,
             "version_info": sys.version_info,
-            # Extra information
             "interpreter_name": interpreter_name(),
             "interpreter_version": interpreter_version(),
         }
@@ -1678,8 +1708,8 @@ class GenericEnv(VirtualEnv):
         patterns = [("python*", "pip*")]
 
         if self._child_env:
-            minor_version = "{}.{}".format(
-                self._child_env.version_info[0], self._child_env.version_info[1]
+            minor_version = (
+                f"{self._child_env.version_info[0]}.{self._child_env.version_info[1]}"
             )
             major_version = f"{self._child_env.version_info[0]}"
             patterns = [
@@ -1732,15 +1762,15 @@ class GenericEnv(VirtualEnv):
 
     def execute(self, bin: str, *args: str, **kwargs: Any) -> Optional[int]:
         command = self.get_command_from_bin(bin) + list(args)
-        env = kwargs.pop("env", {k: v for k, v in os.environ.items()})
+        env = kwargs.pop("env", dict(os.environ))
 
         if not self._is_windows:
             return os.execvpe(command[0], command, env=env)
-        else:
-            exe = subprocess.Popen([command[0]] + command[1:], env=env, **kwargs)
-            exe.communicate()
 
-            return exe.returncode
+        exe = subprocess.Popen([command[0]] + command[1:], env=env, **kwargs)
+        exe.communicate()
+
+        return exe.returncode
 
     def _run(self, cmd: List[str], **kwargs: Any) -> Optional[int]:
         return super(VirtualEnv, self)._run(cmd, **kwargs)

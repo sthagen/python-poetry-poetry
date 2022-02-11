@@ -21,15 +21,10 @@ class BuildCommand(EnvCommand):
     def handle(self) -> None:
         from poetry.core.masonry.builder import Builder
 
-        fmt = "all"
-        if self.option("format"):
-            fmt = self.option("format")
-
+        fmt = self.option("format") or "all"
         package = self.poetry.package
         self.line(
-            "Building <c1>{}</c1> (<c2>{}</c2>)".format(
-                package.pretty_name, package.version
-            )
+            f"Building <c1>{package.pretty_name}</c1> (<c2>{package.version}</c2>)"
         )
 
         builder = Builder(self.poetry)

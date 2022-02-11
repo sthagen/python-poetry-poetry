@@ -7,6 +7,8 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import Union
+from typing import cast
 
 from cleo.helpers import argument
 from cleo.helpers import option
@@ -78,6 +80,11 @@ To remove a repository (repo is a short alias for repositories):
                 lambda val: str(Path(val)),
                 str(Path(CACHE_DIR) / "virtualenvs"),
             ),
+            "virtualenvs.prefer-active-python": (
+                boolean_validator,
+                boolean_normalizer,
+                False,
+            ),
             "experimental.new-installer": (
                 boolean_validator,
                 boolean_normalizer,
@@ -139,6 +146,7 @@ To remove a repository (repo is a short alias for repositories):
         # show the value if no value is provided
         if not self.argument("value") and not self.option("unset"):
             m = re.match(r"^repos?(?:itories)?(?:\.(.+))?", self.argument("key"))
+            value: Union[str, Dict[str, Any]]
             if m:
                 if not m.group(1):
                     value = {}
@@ -153,8 +161,7 @@ To remove a repository (repo is a short alias for repositories):
 
                 self.line(str(value))
             else:
-                values = self.unique_config_values
-                if setting_key not in values:
+                if setting_key not in self.unique_config_values:
                     raise ValueError(f"There is no {setting_key} setting.")
 
                 value = config.get(setting_key)
@@ -166,7 +173,7 @@ To remove a repository (repo is a short alias for repositories):
 
             return 0
 
-        values = self.argument("value")
+        values: List[str] = self.argument("value")
 
         unique_config_values = self.unique_config_values
         if setting_key in unique_config_values:
@@ -230,7 +237,7 @@ To remove a repository (repo is a short alias for repositories):
                 elif len(values) != 2:
                     raise ValueError(
                         "Expected one or two arguments "
-                        "(username, password), got {}".format(len(values))
+                        f"(username, password), got {len(values)}"
                     )
                 else:
                     username = values[0]
@@ -270,7 +277,7 @@ To remove a repository (repo is a short alias for repositories):
 
             return 0
 
-        raise ValueError("Setting {} does not exist".format(self.argument("key")))
+        raise ValueError(f"Setting {self.argument('key')} does not exist")
 
     def _handle_single_value(
         self,
@@ -292,7 +299,9 @@ To remove a repository (repo is a short alias for repositories):
 
         return 0
 
-    def _list_configuration(self, config: Dict, raw: Dict, k: str = "") -> None:
+    def _list_configuration(
+        self, config: Dict[str, Any], raw: Dict[str, Any], k: str = ""
+    ) -> None:
         orig_k = k
         for key, value in sorted(config.items()):
             if k + key in self.LIST_PROHIBITED_SETTINGS:
@@ -302,24 +311,21 @@ To remove a repository (repo is a short alias for repositories):
 
             if isinstance(value, dict):
                 k += f"{key}."
-                self._list_configuration(value, raw_val, k=k)
+                self._list_configuration(value, cast(dict, raw_val), k=k)
                 k = orig_k
 
                 continue
             elif isinstance(value, list):
-                value = [
+                value = ", ".join(
                     json.dumps(val) if isinstance(val, list) else val for val in value
-                ]
-
-                value = "[{}]".format(", ".join(value))
+                )
+                value = f"[{value}]"
 
             if k.startswith("repositories."):
-                message = "<c1>{}</c1> = <c2>{}</c2>".format(
-                    k + key, json.dumps(raw_val)
-                )
+                message = f"<c1>{k + key}</c1> = <c2>{json.dumps(raw_val)}</c2>"
             elif isinstance(raw_val, str) and raw_val != value:
-                message = "<c1>{}</c1> = <c2>{}</c2>  # {}".format(
-                    k + key, json.dumps(raw_val), value
+                message = (
+                    f"<c1>{k + key}</c1> = <c2>{json.dumps(raw_val)}</c2>  # {value}"
                 )
             else:
                 message = f"<c1>{k + key}</c1> = <c2>{json.dumps(value)}</c2>"
@@ -354,19 +360,18 @@ To remove a repository (repo is a short alias for repositories):
                         setting = ".".join(setting.split(".")[1:])
 
                     values += self._get_setting(
-                        value, k=k, setting=setting, default=default
+                        cast(dict, value), k=k, setting=setting, default=default
                     )
                     k = orig_k
 
                     continue
 
                 if isinstance(value, list):
-                    value = [
+                    value = ", ".join(
                         json.dumps(val) if isinstance(val, list) else val
                         for val in value
-                    ]
-
-                    value = "[{}]".format(", ".join(value))
+                    )
+                    value = f"[{value}]"
 
                 value = json.dumps(value)
 

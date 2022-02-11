@@ -53,14 +53,12 @@ def test_cache_list(
 ):
     tester.execute()
 
-    expected = """\
-{}
-{}
-""".format(
-        repository_one, repository_two
-    )
+    expected = f"""\
+{repository_one}
+{repository_two}
+"""
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected
 
 
 def test_cache_list_empty(tester: "CommandTester", repository_cache_dir: "Path"):
@@ -70,4 +68,4 @@ def test_cache_list_empty(tester: "CommandTester", repository_cache_dir: "Path")
 No caches found
 """
 
-    assert expected == tester.io.fetch_output()
+    assert tester.io.fetch_output() == expected

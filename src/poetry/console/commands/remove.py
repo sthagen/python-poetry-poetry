@@ -50,11 +50,10 @@ list of installed packages
 
         if group is None:
             removed = []
-            group_sections = []
-            for group_name, group_section in poetry_content.get("group", {}).items():
-                group_sections.append(
-                    (group_name, group_section.get("dependencies", {}))
-                )
+            group_sections = [
+                (group_name, group_section.get("dependencies", {}))
+                for group_name, group_section in poetry_content.get("group", {}).items()
+            ]
 
             for group_name, section in [
                 ("default", poetry_content["dependencies"])
@@ -84,13 +83,11 @@ list of installed packages
         if "group" in poetry_content and not poetry_content["group"]:
             del poetry_content["group"]
 
-        removed = set(removed)
-        not_found = set(packages).difference(removed)
+        removed_set = set(removed)
+        not_found = set(packages).difference(removed_set)
         if not_found:
             raise ValueError(
-                "The following packages were not found: {}".format(
-                    ", ".join(sorted(not_found))
-                )
+                "The following packages were not found: " + ", ".join(sorted(not_found))
             )
 
         # Refresh the locker
@@ -107,7 +104,7 @@ list of installed packages
         self._installer.dry_run(self.option("dry-run"))
         self._installer.verbose(self._io.is_verbose())
         self._installer.update(True)
-        self._installer.whitelist(removed)
+        self._installer.whitelist(removed_set)
 
         status = self._installer.run()
 

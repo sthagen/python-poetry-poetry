@@ -103,7 +103,8 @@ def test_create_poetry():
     assert functools32.pretty_constraint == "^3.2.3"
     assert (
         str(functools32.marker)
-        == 'python_version ~= "2.7" and sys_platform == "win32" or python_version in "3.4 3.5"'
+        == 'python_version ~= "2.7" and sys_platform == "win32" or python_version in'
+        ' "3.4 3.5"'
     )
 
     assert "db" in package.extras
@@ -287,7 +288,7 @@ def test_create_poetry_fails_on_invalid_configuration():
 The Poetry configuration is invalid:
   - 'description' is a required property
 """
-    assert expected == str(e.value)
+    assert str(e.value) == expected
 
 
 def test_create_poetry_with_local_config(fixture_dir: "FixtureDirGetter"):

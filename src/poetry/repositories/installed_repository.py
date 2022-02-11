@@ -49,8 +49,8 @@ class InstalledRepository(Repository):
         paths = set()
 
         # we identify the candidate pth files to check, this is done so to handle cases
-        # where the pth file for foo-bar might have been installed as either foo-bar.pth or
-        # foo_bar.pth (expected) in either pure or platform lib directories.
+        # where the pth file for foo-bar might have been installed as either foo-bar.pth
+        # or foo_bar.pth (expected) in either pure or platform lib directories.
         candidates = itertools.product(
             {env.purelib, env.platlib},
             {name, module_name(name)},
@@ -146,19 +146,18 @@ class InstalledRepository(Repository):
                         if is_editable_package:
                             source_type = "directory"
                             source_url = paths.pop().as_posix()
+        elif cls.is_vcs_package(path, env):
+            (
+                source_type,
+                source_url,
+                source_reference,
+            ) = cls.get_package_vcs_properties_from_path(
+                env.path / "src" / canonicalize_name(distribution.metadata["name"])
+            )
         else:
-            if cls.is_vcs_package(path, env):
-                (
-                    source_type,
-                    source_url,
-                    source_reference,
-                ) = cls.get_package_vcs_properties_from_path(
-                    env.path / "src" / canonicalize_name(distribution.metadata["name"])
-                )
-            else:
-                # If not, it's a path dependency
-                source_type = "directory"
-                source_url = str(path.parent)
+            # If not, it's a path dependency
+            source_type = "directory"
+            source_url = str(path.parent)
 
         package = Package(
             distribution.metadata["name"],

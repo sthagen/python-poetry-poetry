@@ -43,11 +43,10 @@ class _Writer:
             if isinstance(incompatibility.cause, PythonCause):
                 if not required_python_version_notification:
                     buffer.append(
-                        "The current project's Python requirement ({}) "
-                        "is not compatible with some of the required "
-                        "packages Python requirement:".format(
-                            incompatibility.cause.root_python_version
-                        )
+                        "The current project's Python requirement"
+                        f" ({incompatibility.cause.root_python_version}) is not"
+                        " compatible with some of the required packages Python"
+                        " requirement:"
                     )
                     required_python_version_notification = True
 
@@ -56,11 +55,9 @@ class _Writer:
                 )
                 constraint = parse_constraint(incompatibility.cause.python_version)
                 buffer.append(
-                    "  - {} requires Python {}, so it will not be satisfied for Python {}".format(
-                        incompatibility.terms[0].dependency.name,
-                        incompatibility.cause.python_version,
-                        root_constraint.difference(constraint),
-                    )
+                    f"  - {incompatibility.terms[0].dependency.name} requires Python"
+                    f" {incompatibility.cause.python_version}, so it will not be"
+                    f" satisfied for Python {root_constraint.difference(constraint)}"
                 )
 
         if required_python_version_notification:
@@ -128,14 +125,12 @@ class _Writer:
             other_line = self._line_numbers.get(cause.other)
 
             if conflict_line is not None and other_line is not None:
+                reason = cause.conflict.and_to_string(
+                    cause.other, details_for_cause, conflict_line, other_line
+                )
                 self._write(
                     incompatibility,
-                    "Because {}, {}.".format(
-                        cause.conflict.and_to_string(
-                            cause.other, details_for_cause, conflict_line, other_line
-                        ),
-                        incompatibility_string,
-                    ),
+                    f"Because {reason}, {incompatibility_string}.",
                     numbered=numbered,
                 )
             elif conflict_line is not None or other_line is not None:
@@ -151,9 +146,8 @@ class _Writer:
                 self._visit(without_line, details_for_cause)
                 self._write(
                     incompatibility,
-                    "{} because {} ({}), {}.".format(
-                        conjunction, str(with_line), line, incompatibility_string
-                    ),
+                    f"{conjunction} because {with_line!s} ({line}),"
+                    f" {incompatibility_string}.",
                     numbered=numbered,
                 )
             else:
@@ -178,12 +172,9 @@ class _Writer:
 
                     self._write(
                         incompatibility,
-                        "{} because {} ({}), {}".format(
-                            conjunction,
-                            str(cause.conflict),
-                            self._line_numbers[cause.conflict],
-                            incompatibility_string,
-                        ),
+                        f"{conjunction} because"
+                        f" {cause.conflict!s} ({self._line_numbers[cause.conflict]}),"
+                        f" {incompatibility_string}",
                         numbered=numbered,
                     )
         elif isinstance(cause.conflict.cause, ConflictCause) or isinstance(
@@ -202,58 +193,47 @@ class _Writer:
 
             derived_line = self._line_numbers.get(derived)
             if derived_line is not None:
+                reason = ext.and_to_string(
+                    derived, details_for_cause, None, derived_line
+                )
                 self._write(
                     incompatibility,
-                    "Because {}, {}.".format(
-                        ext.and_to_string(
-                            derived, details_for_cause, None, derived_line
-                        ),
-                        incompatibility_string,
-                    ),
+                    f"Because {reason}, {incompatibility_string}.",
                     numbered=numbered,
                 )
             elif self._is_collapsible(derived):
                 derived_cause: ConflictCause = derived.cause
                 if isinstance(derived_cause.conflict.cause, ConflictCause):
                     collapsed_derived = derived_cause.conflict
+                    collapsed_ext = derived_cause.other
                 else:
                     collapsed_derived = derived_cause.other
 
-                if isinstance(derived_cause.conflict.cause, ConflictCause):
-                    collapsed_ext = derived_cause.other
-                else:
                     collapsed_ext = derived_cause.conflict
 
                 details_for_cause = {}
 
                 self._visit(collapsed_derived, details_for_cause)
+                reason = collapsed_ext.and_to_string(ext, details_for_cause, None, None)
                 self._write(
                     incompatibility,
-                    "{} because {}, {}.".format(
-                        conjunction,
-                        collapsed_ext.and_to_string(ext, details_for_cause, None, None),
-                        incompatibility_string,
-                    ),
+                    f"{conjunction} because {reason}, {incompatibility_string}.",
                     numbered=numbered,
                 )
             else:
                 self._visit(derived, details_for_cause)
                 self._write(
                     incompatibility,
-                    "{} because {}, {}.".format(
-                        conjunction, str(ext), incompatibility_string
-                    ),
+                    f"{conjunction} because {ext!s}, {incompatibility_string}.",
                     numbered=numbered,
                 )
         else:
+            reason = cause.conflict.and_to_string(
+                cause.other, details_for_cause, None, None
+            )
             self._write(
                 incompatibility,
-                "Because {}, {}.".format(
-                    cause.conflict.and_to_string(
-                        cause.other, details_for_cause, None, None
-                    ),
-                    incompatibility_string,
-                ),
+                f"Because {reason}, {incompatibility_string}.",
                 numbered=numbered,
             )
 

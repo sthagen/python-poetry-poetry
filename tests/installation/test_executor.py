@@ -17,7 +17,6 @@ from cleo.formatters.style import Style
 from cleo.io.buffered_io import BufferedIO
 from poetry.core.packages.package import Package
 from poetry.core.packages.utils.link import Link
-from poetry.core.utils._compat import PY36
 
 from poetry.installation.executor import Executor
 from poetry.installation.operations import Install
@@ -111,7 +110,7 @@ def test_execute_executes_a_batch_of_operations(
     env: MockEnv,
 ):
     pip_editable_install = mocker.patch(
-        "poetry.installation.executor.pip_editable_install", unsafe=not PY36
+        "poetry.installation.executor.pip_editable_install"
     )
 
     config.merge({"cache-dir": tmp_dir})
@@ -161,22 +160,20 @@ def test_execute_executes_a_batch_of_operations(
         ]
     )
 
-    expected = """
+    expected = f"""
 Package operations: 4 installs, 1 update, 1 removal
 
   • Installing pytest (3.5.2)
   • Removing attrs (17.4.0)
   • Updating requests (2.18.3 -> 2.18.4)
-  • Installing demo (0.1.0 {})
-  • Installing simple-project (1.2.3 {})
+  • Installing demo (0.1.0 {file_package.source_url})
+  • Installing simple-project (1.2.3 {directory_package.source_url})
   • Installing demo (0.1.0 master)
-""".format(
-        file_package.source_url, directory_package.source_url
-    )
+"""
 
     expected = set(expected.splitlines())
     output = set(io.fetch_output().splitlines())
-    assert expected == output
+    assert output == expected
     assert len(env.executed) == 5
     assert return_code == 0
     pip_editable_install.assert_called_once()
@@ -202,7 +199,7 @@ Package operations: 0 installs, 0 updates, 0 removals, 1 skipped
 
   • Removing clikit (0.2.3): Skipped for the following reason: Not currently installed
 """
-    assert expected == io.fetch_output()
+    assert io.fetch_output() == expected
     assert len(env.executed) == 0
 
 
@@ -253,13 +250,16 @@ def test_execute_works_with_ansi_output(
     )
     env._run.assert_called_once()
 
+    # fmt: off
     expected = [
-        "\x1b[39;1mPackage operations\x1b[39;22m: \x1b[34m1\x1b[39m install, \x1b[34m0\x1b[39m updates, \x1b[34m0\x1b[39m removals",
-        "\x1b[34;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[39;1m3.5.2\x1b[39;22m\x1b[39m)\x1b[39m: \x1b[34mPending...\x1b[39m",
-        "\x1b[34;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[39;1m3.5.2\x1b[39;22m\x1b[39m)\x1b[39m: \x1b[34mDownloading...\x1b[39m",
-        "\x1b[34;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[39;1m3.5.2\x1b[39;22m\x1b[39m)\x1b[39m: \x1b[34mInstalling...\x1b[39m",
-        "\x1b[32;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[32m3.5.2\x1b[39m\x1b[39m)\x1b[39m",  # finished
+        "\x1b[39;1mPackage operations\x1b[39;22m: \x1b[34m1\x1b[39m install, \x1b[34m0\x1b[39m updates, \x1b[34m0\x1b[39m removals",  # noqa: E501
+        "\x1b[34;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[39;1m3.5.2\x1b[39;22m\x1b[39m)\x1b[39m: \x1b[34mPending...\x1b[39m",  # noqa: E501
+        "\x1b[34;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[39;1m3.5.2\x1b[39;22m\x1b[39m)\x1b[39m: \x1b[34mDownloading...\x1b[39m",  # noqa: E501
+        "\x1b[34;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[39;1m3.5.2\x1b[39;22m\x1b[39m)\x1b[39m: \x1b[34mInstalling...\x1b[39m",  # noqa: E501
+        "\x1b[32;1m•\x1b[39;22m \x1b[39mInstalling \x1b[39m\x1b[36mpytest\x1b[39m\x1b[39m (\x1b[39m\x1b[32m3.5.2\x1b[39m\x1b[39m)\x1b[39m",  # finished  # noqa: E501
     ]
+    # fmt: on
+
     output = io_decorated.fetch_output()
     # hint: use print(repr(output)) if you need to debug this
 
@@ -299,7 +299,7 @@ Package operations: 1 install, 0 updates, 0 removals
 """
     expected = set(expected.splitlines())
     output = set(io_not_decorated.fetch_output().splitlines())
-    assert expected == output
+    assert output == expected
     assert return_code == 0
 
 
@@ -321,7 +321,7 @@ Package operations: 1 install, 0 updates, 0 removals
   • Installing clikit (0.2.3): Cancelled
 """
 
-    assert expected == io.fetch_output()
+    assert io.fetch_output() == expected
 
 
 def test_execute_should_gracefully_handle_io_error(
@@ -544,7 +544,7 @@ def test_executor_should_use_cached_link_and_hash(
     package.files = [
         {
             "file": "demo-0.1.0-py2.py3-none-any.whl",
-            "hash": "sha256:70e704135718fffbcbf61ed1fc45933cfd86951a744b681000eaaa75da31f17a",
+            "hash": "sha256:70e704135718fffbcbf61ed1fc45933cfd86951a744b681000eaaa75da31f17a",  # noqa: E501
         }
     ]
 

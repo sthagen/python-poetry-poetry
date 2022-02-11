@@ -38,6 +38,7 @@ class Config:
             "in-project": None,
             "path": os.path.join("{cache-dir}", "virtualenvs"),
             "options": {"always-copy": False, "system-site-packages": False},
+            "prefer-active-python": False,
         },
         "experimental": {"new-installer": True},
         "installer": {"parallel": True, "max-workers": None},
@@ -111,9 +112,7 @@ class Config:
         # Looking in the environment if the setting
         # is set via a POETRY_* environment variable
         if self._use_environment:
-            env = "POETRY_{}".format(
-                "_".join(k.upper().replace("-", "_") for k in keys)
-            )
+            env = "POETRY_" + "_".join(k.upper().replace("-", "_") for k in keys)
             env_value = os.getenv(env)
             if env_value is not None:
                 return self.process(self._get_normalizer(setting_name)(env_value))
@@ -140,6 +139,7 @@ class Config:
             "virtualenvs.in-project",
             "virtualenvs.options.always-copy",
             "virtualenvs.options.system-site-packages",
+            "virtualenvs.options.prefer-active-python",
             "experimental.new-installer",
             "installer.parallel",
         }:

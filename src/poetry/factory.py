@@ -100,9 +100,7 @@ class Factory(BaseFactory):
         if config_file.exists():
             if io.is_debug():
                 io.write_line(
-                    "<debug>Loading configuration file {}</debug>".format(
-                        config_file.path
-                    )
+                    f"<debug>Loading configuration file {config_file.path}</debug>"
                 )
 
             config.merge(config_file.read())
@@ -114,9 +112,7 @@ class Factory(BaseFactory):
         if auth_config_file.exists():
             if io.is_debug():
                 io.write_line(
-                    "<debug>Loading configuration file {}</debug>".format(
-                        auth_config_file.path
-                    )
+                    f"<debug>Loading configuration file {auth_config_file.path}</debug>"
                 )
 
             config.merge(auth_config_file.read())
@@ -131,12 +127,10 @@ class Factory(BaseFactory):
     ) -> None:
         for source in sources:
             repository = cls.create_legacy_repository(source, config)
-            is_default = source.get("default", False)
-            is_secondary = source.get("secondary", False)
+            is_default = bool(source.get("default", False))
+            is_secondary = bool(source.get("secondary", False))
             if io.is_debug():
-                message = "Adding repository {} ({})".format(
-                    repository.name, repository.url
-                )
+                message = f"Adding repository {repository.name} ({repository.url})"
                 if is_default:
                     message += " and setting it as the default one"
                 elif is_secondary:
@@ -166,13 +160,12 @@ class Factory(BaseFactory):
         from poetry.utils.helpers import get_cert
         from poetry.utils.helpers import get_client_cert
 
-        if "url" in source:
-            # PyPI-like repository
-            if "name" not in source:
-                raise RuntimeError("Missing [name] in source.")
-        else:
+        if "url" not in source:
             raise RuntimeError("Unsupported source specified")
 
+        # PyPI-like repository
+        if "name" not in source:
+            raise RuntimeError("Missing [name] in source.")
         name = source["name"]
         url = source["url"]
 

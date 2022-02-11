@@ -58,9 +58,8 @@ patch, minor, major, prepatch, preminor, premajor, prerelease.
                 self.line(version.to_string())
             else:
                 self.line(
-                    "Bumping version from <b>{}</> to <fg=green>{}</>".format(
-                        self.poetry.package.pretty_version, version
-                    )
+                    f"Bumping version from <b>{self.poetry.package.pretty_version}</>"
+                    f" to <fg=green>{version}</>"
                 )
 
             content = self.poetry.file.read()
@@ -73,34 +72,35 @@ patch, minor, major, prepatch, preminor, premajor, prerelease.
                 self.line(self.poetry.package.pretty_version)
             else:
                 self.line(
-                    f"<comment>{self.poetry.package.name}</> <info>{self.poetry.package.pretty_version}</>"
+                    f"<comment>{self.poetry.package.name}</>"
+                    f" <info>{self.poetry.package.pretty_version}</>"
                 )
 
     def increment_version(self, version: str, rule: str) -> "Version":
         from poetry.core.semver.version import Version
 
         try:
-            version = Version.parse(version)
+            parsed = Version.parse(version)
         except ValueError:
             raise ValueError("The project's version doesn't seem to follow semver")
 
         if rule in {"major", "premajor"}:
-            new = version.next_major()
+            new = parsed.next_major()
             if rule == "premajor":
                 new = new.first_prerelease()
         elif rule in {"minor", "preminor"}:
-            new = version.next_minor()
+            new = parsed.next_minor()
             if rule == "preminor":
                 new = new.first_prerelease()
         elif rule in {"patch", "prepatch"}:
-            new = version.next_patch()
+            new = parsed.next_patch()
             if rule == "prepatch":
                 new = new.first_prerelease()
         elif rule == "prerelease":
-            if version.is_unstable():
-                new = Version(version.epoch, version.release, version.pre.next())
+            if parsed.is_unstable():
+                new = Version(parsed.epoch, parsed.release, parsed.pre.next())
             else:
-                new = version.next_patch().first_prerelease()
+                new = parsed.next_patch().first_prerelease()
         else:
             new = Version.parse(rule)
 

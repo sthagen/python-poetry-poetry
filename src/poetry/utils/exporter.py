@@ -1,3 +1,4 @@
+import itertools
 import urllib.parse
 
 from typing import TYPE_CHECKING
@@ -45,7 +46,7 @@ class Exporter:
         if fmt not in self.ACCEPTED_FORMATS:
             raise ValueError(f"Invalid export format: {fmt}")
 
-        getattr(self, "_export_{}".format(fmt.replace(".", "_")))(
+        getattr(self, "_export_" + fmt.replace(".", "_"))(
             cwd,
             output,
             with_hashes=with_hashes,
@@ -69,13 +70,21 @@ class Exporter:
         content = ""
         dependency_lines = set()
 
-        for dependency_package in self._poetry.locker.get_project_dependency_packages(
-            project_requires=self._poetry.package.all_requires, dev=dev, extras=extras
+        for package, groups in itertools.groupby(
+            self._poetry.locker.get_project_dependency_packages(
+                project_requires=self._poetry.package.all_requires,
+                dev=dev,
+                extras=extras,
+            ),
+            lambda dependency_package: dependency_package.package,
         ):
             line = ""
-
-            dependency = dependency_package.dependency
-            package = dependency_package.package
+            dependency_packages = list(groups)
+            dependency = dependency_packages[0].dependency
+            marker = dependency.marker
+            for dep_package in dependency_packages[1:]:
+                marker = marker.union(dep_package.dependency.marker)
+            dependency.marker = marker
 
             if package.develop:
                 line += "-e "
@@ -120,11 +129,8 @@ class Exporter:
                     hashes.append(f"{algorithm}:{h}")
 
                 if hashes:
-                    line += " \\\n"
-                    for i, h in enumerate(hashes):
-                        line += "    --hash={}{}".format(
-                            h, " \\\n" if i < len(hashes) - 1 else ""
-                        )
+                    sep = " \\\n"
+                    line += sep + sep.join(f"    --hash={h}" for h in hashes)
             dependency_lines.add(line)
 
         content += "\n".join(sorted(dependency_lines))
