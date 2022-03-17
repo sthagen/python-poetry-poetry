@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "poetry"
-version = "1.2.0a2"
+version = "1.2.0-beta.1"
 description = "Python dependency management and packaging made easy."
 authors = [
     "Sébastien Eustace <sebastien@eustace.io>"
@@ -34,14 +34,14 @@ generate-setup-file = false
 [tool.poetry.dependencies]
 python = "^3.7"
 
-poetry-core = "^1.1.0a6"
+poetry-core = "^1.1.0a7"
 cachecontrol = { version = "^0.12.9", extras = ["filecache"] }
 cachy = "^0.3.0"
 cleo = "^1.0.0a4"
 crashtest = "^0.3.0"
 entrypoints = "^0.3"
 html5lib = "^1.0"
-importlib-metadata = { version = "^1.6.0", python = "<3.8" }
+importlib-metadata = { version = ">=1.6.0", python = "<3.8" }
 keyring = ">=21.2.0"
 packaging = "^20.4"
 pexpect = "^4.7.0"
@@ -52,6 +52,7 @@ shellingham = "^1.1"
 tomlkit = ">=0.7.0,<1.0.0"
 # exclude 20.4.5 - 20.4.6 due to https://github.com/pypa/pip/issues/9953
 virtualenv = "(>=20.4.3,<20.4.5 || >=20.4.7)"
+urllib3 = "^1.26.0"
 
 [tool.poetry.dev-dependencies]
 tox = "^3.18"
@@ -111,7 +112,6 @@ files = "src"
 
 [[tool.mypy.overrides]]
 module = [
-  'poetry.config.file_config_source',
   'poetry.console.application',
   'poetry.console.logging.formatters.builder_formatter',
   'poetry.console.commands.init',
@@ -129,7 +129,6 @@ module = [
   'poetry.mixology.solutions.solutions.python_requirement_solution',
   'poetry.mixology.term',
   'poetry.mixology.version_solver',
-  'poetry.packages.locker',
   'poetry.repositories.installed_repository',
   'poetry.utils.appdirs',
   'poetry.utils.authenticator',

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from cleo.helpers import option
 
 from poetry.console.commands.installer_command import InstallerCommand
@@ -40,7 +42,7 @@ file.
             if self.poetry.locker.is_locked() and self.poetry.locker.is_fresh():
                 self.line("poetry.lock is consistent with pyproject.toml.")
                 return 0
-            self.line(
+            self.line_error(
                 "<error>"
                 "Error: poetry.lock is not consistent with pyproject.toml. "
                 "Run `poetry lock [--no-update]` to fix it."
