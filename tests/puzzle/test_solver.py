@@ -418,6 +418,30 @@ def test_solver_fails_if_mismatch_root_python_versions(
         solver.solve()
 
 
+def test_solver_ignores_python_restricted_if_mismatch_root_package_python_versions(
+    solver: Solver, repo: Repository, package: ProjectPackage
+):
+    solver.provider.set_package_python_versions("~3.8")
+    package.add_dependency(
+        Factory.create_dependency("A", {"version": "1.0", "python": "<3.8"})
+    )
+    package.add_dependency(
+        Factory.create_dependency(
+            "B", {"version": "1.0", "markers": "python_version < '3.8'"}
+        )
+    )
+
+    package_a = get_package("A", "1.0")
+    package_b = get_package("B", "1.0")
+
+    repo.add_package(package_a)
+    repo.add_package(package_b)
+
+    transaction = solver.solve()
+
+    check_solver_result(transaction, [])
+
+
 def test_solver_solves_optional_and_compatible_packages(
     solver: Solver, repo: Repository, package: ProjectPackage
 ):
@@ -684,6 +708,53 @@ def test_solver_returns_extras_only_requested_nested(
 
     assert ops[-1].package.marker.is_any()
     assert ops[0].package.marker.is_any()
+
+
+def test_solver_finds_extras_next_to_non_extras(
+    solver: Solver, repo: Repository, package: ProjectPackage
+):
+    # Root depends on A[foo]
+    package.add_dependency(
+        Factory.create_dependency("A", {"version": "*", "extras": ["foo"]})
+    )
+
+    package_a = get_package("A", "1.0")
+    package_b = get_package("B", "1.0")
+    package_c = get_package("C", "1.0")
+    package_d = get_package("D", "1.0")
+
+    # A depends on B; A[foo] depends on B[bar].
+    package_a.add_dependency(Factory.create_dependency("B", "*"))
+    package_a.add_dependency(
+        Factory.create_dependency(
+            "B", {"version": "*", "extras": ["bar"], "markers": "extra == 'foo'"}
+        )
+    )
+    package_a.extras = {"foo": [get_dependency("B", "*")]}
+
+    # B depends on C; B[bar] depends on D.
+    package_b.add_dependency(Factory.create_dependency("C", "*"))
+    package_b.add_dependency(
+        Factory.create_dependency("D", {"version": "*", "markers": 'extra == "bar"'})
+    )
+    package_b.extras = {"bar": [get_dependency("D", "*")]}
+
+    repo.add_package(package_a)
+    repo.add_package(package_b)
+    repo.add_package(package_c)
+    repo.add_package(package_d)
+
+    transaction = solver.solve()
+
+    check_solver_result(
+        transaction,
+        [
+            {"job": "install", "package": package_c},
+            {"job": "install", "package": package_d},
+            {"job": "install", "package": package_b},
+            {"job": "install", "package": package_a},
+        ],
+    )
 
 
 def test_solver_returns_prereleases_if_requested(
@@ -3075,5 +3146,59 @@ def test_solver_should_not_raise_errors_for_irrelevant_transitive_python_constra
             {"job": "install", "package": importlib_resources_3_2_1},
             {"job": "install", "package": pre_commit},
             {"job": "install", "package": virtualenv},
+        ],
+    )
+
+
+@pytest.mark.parametrize("is_locked", [False, True])
+def test_solver_keeps_multiple_locked_dependencies_for_same_package(
+    solver: Solver,
+    repo: Repository,
+    package: Package,
+    locked: Repository,
+    is_locked: bool,
+):
+    solver.provider.set_package_python_versions("^3.6")
+    package.add_dependency(
+        Factory.create_dependency("A", {"version": "~1.1", "python": "<3.7"})
+    )
+    package.add_dependency(
+        Factory.create_dependency("A", {"version": "~1.2", "python": ">=3.7"})
+    )
+
+    a11 = Package("A", "1.1")
+    a12 = Package("A", "1.2")
+
+    a11.add_dependency(Factory.create_dependency("B", {"version": ">=0.3"}))
+    a12.add_dependency(Factory.create_dependency("B", {"version": ">=0.3"}))
+
+    b03 = Package("B", "0.3")
+    b04 = Package("B", "0.4")
+    b04.python_versions = ">=3.6.2,<4.0.0"
+
+    repo.add_package(a11)
+    repo.add_package(a12)
+    repo.add_package(b03)
+    repo.add_package(b04)
+
+    if is_locked:
+        a11_locked = a11.clone()
+        a11_locked.python_versions = "<3.7"
+        locked.add_package(a11_locked)
+        a12_locked = a12.clone()
+        a12_locked.python_versions = ">=3.7"
+        locked.add_package(a12_locked)
+        locked.add_package(b03.clone())
+        locked.add_package(b04.clone())
+
+    transaction = solver.solve()
+
+    check_solver_result(
+        transaction,
+        [
+            {"job": "install", "package": b03},
+            {"job": "install", "package": b04},
+            {"job": "install", "package": a11},
+            {"job": "install", "package": a12},
         ],
     )
