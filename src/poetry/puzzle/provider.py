@@ -7,17 +7,21 @@ import tempfile
 import time
 import urllib.parse
 
+from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import mkdtemp
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Iterable
 from typing import Iterator
 
 from cleo.ui.progress_indicator import ProgressIndicator
 from poetry.core.packages.utils.utils import get_python_constraint_from_marker
+from poetry.core.semver.empty_constraint import EmptyConstraint
 from poetry.core.semver.version import Version
 from poetry.core.vcs.git import Git
+from poetry.core.version.markers import AnyMarker
 from poetry.core.version.markers import MarkerUnion
 
 from poetry.inspection.info import PackageInfo
@@ -40,6 +44,8 @@ if TYPE_CHECKING:
     from poetry.core.packages.package import Package
     from poetry.core.packages.url_dependency import URLDependency
     from poetry.core.packages.vcs_dependency import VCSDependency
+    from poetry.core.semver.version_constraint import VersionConstraint
+    from poetry.core.version.markers import BaseMarker
 
     from poetry.repositories import Pool
     from poetry.utils.env import Env
@@ -69,7 +75,7 @@ class Provider:
         self._python_constraint = package.python_constraint
         self._is_debugging = self._io.is_debug() or self._io.is_very_verbose()
         self._in_progress = False
-        self._overrides: dict = {}
+        self._overrides: dict[DependencyPackage, dict[str, Dependency]] = {}
         self._deferred_cache: dict[Dependency, Package] = {}
         self._load_deferred = True
 
@@ -331,6 +337,28 @@ class Provider:
 
         return package
 
+    def _get_dependencies_with_overrides(
+        self, dependencies: list[Dependency], package: DependencyPackage
+    ) -> list[Dependency]:
+        overrides = self._overrides.get(package, {})
+        _dependencies = []
+        overridden = []
+        for dep in dependencies:
+            if dep.name in overrides:
+                if dep.name in overridden:
+                    continue
+
+                # empty constraint is used in overrides to mark that the package has
+                # already been handled and is not required for the attached markers
+                if not overrides[dep.name].constraint.is_empty():
+                    _dependencies.append(overrides[dep.name])
+                overridden.append(dep.name)
+
+                continue
+
+            _dependencies.append(dep)
+        return _dependencies
+
     def incompatibilities_for(
         self, package: DependencyPackage
     ) -> list[Incompatibility]:
@@ -384,21 +412,7 @@ class Provider:
             and self._python_constraint.allows_any(dep.python_constraint)
             and (not self._env or dep.marker.validate(self._env.marker_env))
         ]
-
-        overrides = self._overrides.get(package, {})
-        dependencies = []
-        overridden = []
-        for dep in _dependencies:
-            if dep.name in overrides:
-                if dep.name in overridden:
-                    continue
-
-                dependencies.append(overrides[dep.name])
-                overridden.append(dep.name)
-
-                continue
-
-            dependencies.append(dep)
+        dependencies = self._get_dependencies_with_overrides(_dependencies, package)
 
         return [
             Incompatibility(
@@ -480,20 +494,7 @@ class Provider:
 
             _dependencies.append(dep)
 
-        overrides = self._overrides.get(package, {})
-        dependencies = []
-        overridden = []
-        for dep in _dependencies:
-            if dep.name in overrides:
-                if dep.name in overridden:
-                    continue
-
-                dependencies.append(overrides[dep.name])
-                overridden.append(dep.name)
-
-                continue
-
-            dependencies.append(dep)
+        dependencies = self._get_dependencies_with_overrides(_dependencies, package)
 
         # Searching for duplicate dependencies
         #
@@ -528,15 +529,12 @@ class Provider:
 
             self.debug(f"<debug>Duplicate dependencies for {dep_name}</debug>")
 
-            # Regrouping by constraint
-            by_constraint: dict[str, list[Dependency]] = {}
+            deps = self._merge_dependencies_by_marker(deps)
+
+            # Merging dependencies by constraint
+            by_constraint: dict[VersionConstraint, list[Dependency]] = defaultdict(list)
             for dep in deps:
-                if dep.constraint not in by_constraint:
-                    by_constraint[dep.constraint] = []
-
                 by_constraint[dep.constraint].append(dep)
-
-            # We merge by constraint
             for constraint, _deps in by_constraint.items():
                 new_markers = []
                 for dep in _deps:
@@ -629,28 +627,51 @@ class Provider:
             any_markers_dependencies = [d for d in _deps if d.marker.is_any()]
             other_markers_dependencies = [d for d in _deps if not d.marker.is_any()]
 
-            if any_markers_dependencies:
-                marker = other_markers_dependencies[0].marker
-                for other_dep in other_markers_dependencies[1:]:
-                    marker = marker.union(other_dep.marker)
+            marker = other_markers_dependencies[0].marker
+            for other_dep in other_markers_dependencies[1:]:
+                marker = marker.union(other_dep.marker)
+            inverted_marker = marker.invert()
 
-                inverted_marker = marker.invert()
+            if any_markers_dependencies:
                 for dep_any in any_markers_dependencies:
                     dep_any.marker = inverted_marker
                     for dep_other in other_markers_dependencies:
                         dep_other.set_constraint(
                             dep_other.constraint.intersect(dep_any.constraint)
                         )
+            elif not inverted_marker.is_empty():
+                # if there is no any marker dependency
+                # and the inverted marker is not empty,
+                # a dependency with the inverted union of all markers is required
+                # in order to not miss other dependencies later, for instance:
+                #   - foo (1.0) ; python == 3.7
+                #   - foo (2.0) ; python == 3.8
+                #   - bar (2.0) ; python == 3.8
+                #   - bar (3.0) ; python == 3.9
+                #
+                # the last dependency would be missed without this,
+                # because the intersection with both foo dependencies is empty
+                inverted_marker_dep = _deps[0].with_constraint(EmptyConstraint())
+                inverted_marker_dep.marker = inverted_marker
+                _deps.append(inverted_marker_dep)
 
             overrides = []
+            overrides_marker_intersection = AnyMarker()
+            for dep_overrides in self._overrides.values():
+                for _dep in dep_overrides.values():
+                    overrides_marker_intersection = (
+                        overrides_marker_intersection.intersect(_dep.marker)
+                    )
             for _dep in _deps:
-                current_overrides = self._overrides.copy()
-                package_overrides = current_overrides.get(package, {}).copy()
-                package_overrides.update({_dep.name: _dep})
-                current_overrides.update({package: package_overrides})
-                overrides.append(current_overrides)
+                if not overrides_marker_intersection.intersect(_dep.marker).is_empty():
+                    current_overrides = self._overrides.copy()
+                    package_overrides = current_overrides.get(package, {}).copy()
+                    package_overrides.update({_dep.name: _dep})
+                    current_overrides.update({package: package_overrides})
+                    overrides.append(current_overrides)
 
-            raise OverrideNeeded(*overrides)
+            if overrides:
+                raise OverrideNeeded(*overrides)
 
         # Modifying dependencies as needed
         clean_dependencies = []
@@ -790,3 +811,29 @@ class Provider:
                 yield
 
         self._in_progress = False
+
+    def _merge_dependencies_by_marker(
+        self, dependencies: Iterable[Dependency]
+    ) -> list[Dependency]:
+        by_marker: dict[BaseMarker, list[Dependency]] = defaultdict(list)
+        for dep in dependencies:
+            by_marker[dep.marker].append(dep)
+        deps = []
+        for _deps in by_marker.values():
+            if len(_deps) == 1:
+                deps.extend(_deps)
+            else:
+                new_constraint = _deps[0].constraint
+                for dep in _deps[1:]:
+                    new_constraint = new_constraint.intersect(dep.constraint)
+                if new_constraint.is_empty():
+                    # leave dependencies as-is so the resolver will pickup
+                    # the conflict and display a proper error.
+                    deps.extend(_deps)
+                else:
+                    self.debug(
+                        f"<debug>Merging constraints for {_deps[0].name} for"
+                        f" marker {_deps[0].marker}</debug>"
+                    )
+                    deps.append(_deps[0].with_constraint(new_constraint))
+        return deps

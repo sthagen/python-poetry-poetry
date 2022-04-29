@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -190,13 +191,15 @@ def config(
     return c
 
 
+@pytest.fixture()
+def config_dir(tmp_dir: str) -> str:
+    return tempfile.mkdtemp(prefix="poetry_config_", dir=tmp_dir)
+
+
 @pytest.fixture(autouse=True)
-def mock_user_config_dir(mocker: MockerFixture) -> Iterator[None]:
-    config_dir = tempfile.mkdtemp(prefix="poetry_config_")
+def mock_user_config_dir(mocker: MockerFixture, config_dir: str) -> None:
     mocker.patch("poetry.locations.CONFIG_DIR", new=config_dir)
     mocker.patch("poetry.factory.CONFIG_DIR", new=config_dir)
-    yield
-    shutil.rmtree(config_dir, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -224,6 +227,21 @@ def pep517_metadata_mock(mocker: MockerFixture) -> None:
 @pytest.fixture
 def environ() -> Iterator[None]:
     original_environ = dict(os.environ)
+
+    yield
+
+    os.environ.clear()
+    os.environ.update(original_environ)
+
+
+@pytest.fixture(autouse=True)
+def isolate_environ() -> Iterator[None]:
+    """Ensure the environment is isolated from user configuration."""
+    original_environ = dict(os.environ)
+
+    for var in os.environ:
+        if var.startswith("POETRY_"):
+            del os.environ[var]
 
     yield
 
@@ -400,3 +418,14 @@ def project_factory(
 @pytest.fixture
 def project_root() -> Path:
     return Path(__file__).parent.parent
+
+
+@pytest.fixture(autouse=True)
+def set_simple_log_formatter() -> None:
+    """
+    This fixture removes any formatting added via IOFormatter.
+    """
+    for name in logging.Logger.manager.loggerDict:
+        for handler in logging.getLogger(name).handlers:
+            # replace formatter with simple formatter for testing
+            handler.setFormatter(logging.Formatter(fmt="%(message)s"))

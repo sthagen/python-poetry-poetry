@@ -212,6 +212,7 @@ class Application(BaseApplication):
     def register_command_loggers(
         self, event: ConsoleCommandEvent, event_name: str, _: Any
     ) -> None:
+        from poetry.console.logging.filters import POETRY_FILTER
         from poetry.console.logging.io_formatter import IOFormatter
         from poetry.console.logging.io_handler import IOHandler
 
@@ -232,23 +233,34 @@ class Application(BaseApplication):
         handler = IOHandler(io)
         handler.setFormatter(IOFormatter())
 
+        level = logging.WARNING
+
+        if io.is_debug():
+            level = logging.DEBUG
+        elif io.is_very_verbose() or io.is_verbose():
+            level = logging.INFO
+
+        logging.basicConfig(level=level, handlers=[handler])
+
+        # only log third-party packages when very verbose
+        if not io.is_very_verbose():
+            handler.addFilter(POETRY_FILTER)
+
         for name in loggers:
             logger = logging.getLogger(name)
 
             logger.handlers = [handler]
 
-            level = logging.WARNING
+            _level = level
             # The builders loggers are special and we can actually
             # start at the INFO level.
-            if logger.name.startswith("poetry.core.masonry.builders"):
-                level = logging.INFO
+            if (
+                logger.name.startswith("poetry.core.masonry.builders")
+                and _level > logging.INFO
+            ):
+                _level = logging.INFO
 
-            if io.is_debug():
-                level = logging.DEBUG
-            elif io.is_very_verbose() or io.is_verbose():
-                level = logging.INFO
-
-            logger.setLevel(level)
+            logger.setLevel(_level)
 
     def configure_env(
         self, event: ConsoleCommandEvent, event_name: str, _: Any
