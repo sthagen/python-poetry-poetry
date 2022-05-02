@@ -30,6 +30,7 @@ from poetry.repositories import Repository
 from poetry.utils.env import EnvManager
 from poetry.utils.env import SystemEnv
 from poetry.utils.env import VirtualEnv
+from poetry.utils.helpers import remove_directory
 from tests.helpers import TestLocker
 from tests.helpers import TestRepository
 from tests.helpers import get_package
@@ -38,11 +39,30 @@ from tests.helpers import mock_download
 
 
 if TYPE_CHECKING:
+    from _pytest.config import Config as PyTestConfig
+    from _pytest.config.argparsing import Parser
     from pytest_mock import MockerFixture
 
     from poetry.poetry import Poetry
     from tests.types import FixtureDirGetter
     from tests.types import ProjectFactory
+
+
+def pytest_addoption(parser: Parser) -> None:
+    parser.addoption(
+        "--integration",
+        action="store_true",
+        dest="integration",
+        default=False,
+        help="enable integration tests",
+    )
+
+
+def pytest_configure(config: PyTestConfig) -> None:
+    config.addinivalue_line("markers", "integration: mark integration tests")
+
+    if not config.option.integration:
+        config.option.markexpr = "not integration"
 
 
 class Config(BaseConfig):
@@ -252,9 +272,8 @@ def isolate_environ() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def git_mock(mocker: MockerFixture) -> None:
     # Patch git module to not actually clone projects
-    mocker.patch("poetry.core.vcs.git.Git.clone", new=mock_clone)
-    mocker.patch("poetry.core.vcs.git.Git.checkout", new=lambda *_: None)
-    p = mocker.patch("poetry.core.vcs.git.Git.rev_parse")
+    mocker.patch("poetry.vcs.git.Git.clone", new=mock_clone)
+    p = mocker.patch("poetry.vcs.git.Git.get_revision")
     p.return_value = "9cf87a285a2d3fbb0b9fa621997b3acc3631ed24"
 
 
@@ -288,7 +307,7 @@ def tmp_dir() -> Iterator[str]:
 
     yield dir_
 
-    shutil.rmtree(dir_)
+    remove_directory(dir_, force=True)
 
 
 @pytest.fixture
