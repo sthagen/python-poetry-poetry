@@ -22,8 +22,6 @@ from poetry.utils.helpers import remove_directory
 
 
 if TYPE_CHECKING:
-    from dataclasses import InitVar
-
     from dulwich.client import FetchPackResult
     from dulwich.client import GitClient
 
@@ -137,7 +135,7 @@ class GitRefSpec:
 
 @dataclasses.dataclass
 class GitRepoLocalInfo:
-    repo: InitVar[Repo | Path | str]
+    repo: dataclasses.InitVar[Repo | Path | str]
     origin: str = dataclasses.field(init=False)
     revision: str = dataclasses.field(init=False)
 
@@ -157,7 +155,11 @@ class Git:
         with repo:
             config = repo.get_config()
             section = (b"remote", remote.encode("utf-8"))
-            return config.get(section, b"url") if config.has_section(section) else ""
+            return (
+                config.get(section, b"url").decode("utf-8")
+                if config.has_section(section)
+                else ""
+            )
 
     @staticmethod
     def get_revision(repo: Repo) -> str:
@@ -238,11 +240,16 @@ class Git:
 
         remote_refs = cls._fetch_remote_refs(url=url, local=local)
 
+        logger.debug(
+            "Cloning <c2>%s</> at '<c2>%s</>' to <c1>%s</>", url, refspec.key, target
+        )
+
         try:
             refspec.resolve(remote_refs=remote_refs)
         except KeyError:  # branch / ref does not exist
             raise PoetrySimpleConsoleException(
-                f"Failed to clone {url} at '{refspec.key}'"
+                f"Failed to clone {url} at '{refspec.key}', verify ref exists on"
+                " remote."
             )
 
         # ensure local HEAD matches remote
@@ -272,13 +279,26 @@ class Git:
             # this implies the ref we need does not exist or is invalid
             if isinstance(e, KeyError):
                 # the local copy is at a bad state, lets remove it
+                logger.debug(
+                    "Removing local clone (<c1>%s</>) of repository as it is in a"
+                    " broken state.",
+                    local.path,
+                )
                 remove_directory(local.path, force=True)
 
             if isinstance(e, AssertionError) and "Invalid object name" not in str(e):
                 raise
 
+            logger.debug(
+                "\nRequested ref (<c2>%s</c2>) was not fetched to local copy and cannot"
+                " be used. The following error was raised:\n\n\t<warning>%s</>",
+                refspec.key,
+                e,
+            )
+
             raise PoetrySimpleConsoleException(
-                f"Failed to clone {url} at '{refspec.key}'"
+                f"Failed to clone {url} at '{refspec.key}', verify ref exists on"
+                " remote."
             )
 
         return local
@@ -367,7 +387,11 @@ class Git:
                     if not is_revision_sha(revision=current_sha):
                         # head is not a sha, this will cause issues later, lets reset
                         remove_directory(target, force=True)
-                    elif refspec.is_sha and current_sha.startswith(refspec.revision):
+                    elif (
+                        refspec.is_sha
+                        and refspec.revision is not None
+                        and current_sha.startswith(refspec.revision)
+                    ):
                         # if revision is used short-circuit remote fetch head matches
                         return current_repo
 

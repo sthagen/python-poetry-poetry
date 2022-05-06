@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
+
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Any
+from typing import cast
 
 from cleo.io.null_io import NullIO
 from poetry.core.factory import Factory as BaseFactory
+from poetry.core.packages.vcs_dependency import VCSDependency
 from poetry.core.toml.file import TOMLFile
+from tomlkit.toml_document import TOMLDocument
 
 from poetry.config.config import Config
 from poetry.config.file_config_source import FileConfigSource
@@ -23,6 +29,9 @@ if TYPE_CHECKING:
     from poetry.repositories.legacy_repository import LegacyRepository
 
 
+logger = logging.getLogger(__name__)
+
+
 class Factory(BaseFactory):
     """
     Factory class to create various elements needed by Poetry.
@@ -33,6 +42,7 @@ class Factory(BaseFactory):
         cwd: Path | None = None,
         io: IO | None = None,
         disable_plugins: bool = False,
+        disable_cache: bool = False,
     ) -> Poetry:
         if io is None:
             io = NullIO()
@@ -75,7 +85,11 @@ class Factory(BaseFactory):
 
         # Configuring sources
         self.configure_sources(
-            poetry, poetry.local_config.get("source", []), config, io
+            poetry,
+            poetry.local_config.get("source", []),
+            config,
+            io,
+            disable_cache=disable_cache,
         )
 
         plugin_manager = PluginManager(Plugin.group, disable_plugins=disable_plugins)
@@ -123,10 +137,20 @@ class Factory(BaseFactory):
 
     @classmethod
     def configure_sources(
-        cls, poetry: Poetry, sources: list[dict[str, str]], config: Config, io: IO
+        cls,
+        poetry: Poetry,
+        sources: list[dict[str, str]],
+        config: Config,
+        io: IO,
+        disable_cache: bool = False,
     ) -> None:
+        if disable_cache:
+            logger.debug("Disabling source caches")
+
         for source in sources:
-            repository = cls.create_legacy_repository(source, config)
+            repository = cls.create_legacy_repository(
+                source, config, disable_cache=disable_cache
+            )
             is_default = bool(source.get("default", False))
             is_secondary = bool(source.get("secondary", False))
             if io.is_debug():
@@ -150,11 +174,13 @@ class Factory(BaseFactory):
             from poetry.repositories.pypi_repository import PyPiRepository
 
             default = not poetry.pool.has_primary_repositories()
-            poetry.pool.add_repository(PyPiRepository(), default, not default)
+            poetry.pool.add_repository(
+                PyPiRepository(disable_cache=disable_cache), default, not default
+            )
 
     @classmethod
     def create_legacy_repository(
-        cls, source: dict[str, str], auth_config: Config
+        cls, source: dict[str, str], auth_config: Config, disable_cache: bool = False
     ) -> LegacyRepository:
         from poetry.repositories.legacy_repository import LegacyRepository
         from poetry.utils.helpers import get_cert
@@ -175,6 +201,7 @@ class Factory(BaseFactory):
             config=auth_config,
             cert=get_cert(auth_config, name),
             client_cert=get_client_cert(auth_config, name),
+            disable_cache=disable_cache,
         )
 
     @classmethod
@@ -183,7 +210,7 @@ class Factory(BaseFactory):
 
         from poetry.layouts.layout import POETRY_DEFAULT
 
-        pyproject = tomlkit.loads(POETRY_DEFAULT)
+        pyproject: dict[str, Any] = tomlkit.loads(POETRY_DEFAULT)
         content = pyproject["tool"]["poetry"]
 
         content["name"] = package.name
@@ -195,8 +222,9 @@ class Factory(BaseFactory):
         dependency_section["python"] = package.python_versions
 
         for dep in package.requires:
-            constraint = tomlkit.inline_table()
+            constraint: dict[str, Any] = tomlkit.inline_table()
             if dep.is_vcs():
+                dep = cast(VCSDependency, dep)
                 constraint[dep.vcs] = dep.source_url
 
                 if dep.reference:
@@ -217,6 +245,7 @@ class Factory(BaseFactory):
 
             dependency_section[dep.name] = constraint
 
+        assert isinstance(pyproject, TOMLDocument)
         path.joinpath("pyproject.toml").write_text(
             pyproject.as_string(), encoding="utf-8"
         )
