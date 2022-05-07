@@ -58,7 +58,7 @@ To remove a repository (repo is a short alias for repositories):
             "cache-dir": (
                 str,
                 lambda val: str(Path(val)),
-                str(Path(CACHE_DIR) / "virtualenvs"),
+                str(CACHE_DIR / "virtualenvs"),
             ),
             "virtualenvs.create": (boolean_validator, boolean_normalizer, True),
             "virtualenvs.in-project": (boolean_validator, boolean_normalizer, False),
@@ -72,10 +72,20 @@ To remove a repository (repo is a short alias for repositories):
                 boolean_normalizer,
                 False,
             ),
+            "virtualenvs.options.no-pip": (
+                boolean_validator,
+                boolean_normalizer,
+                False,
+            ),
+            "virtualenvs.options.no-setuptools": (
+                boolean_validator,
+                boolean_normalizer,
+                False,
+            ),
             "virtualenvs.path": (
                 str,
                 lambda val: str(Path(val)),
-                str(Path(CACHE_DIR) / "virtualenvs"),
+                str(CACHE_DIR / "virtualenvs"),
             ),
             "virtualenvs.prefer-active-python": (
                 boolean_validator,
@@ -112,7 +122,7 @@ To remove a repository (repo is a short alias for repositories):
         from poetry.locations import CONFIG_DIR
 
         config = Factory.create_config(self.io)
-        config_file = TOMLFile(Path(CONFIG_DIR) / "config.toml")
+        config_file = TOMLFile(CONFIG_DIR / "config.toml")
 
         try:
             local_config_file = TOMLFile(self.poetry.file.parent / "poetry.toml")
