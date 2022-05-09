@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 import urllib.parse
 
 from pathlib import Path
@@ -71,7 +72,18 @@ def copy_or_symlink(source: Path, dest: Path) -> None:
     elif dest.is_dir():
         shutil.rmtree(dest)
 
-    os.symlink(str(source), str(dest), target_is_directory=source.is_dir())
+    # os.symlink requires either administrative privileges or developer mode on Win10,
+    # throwing an OSError if neither is active.
+    if sys.platform == "win32":
+        try:
+            os.symlink(str(source), str(dest), target_is_directory=source.is_dir())
+        except OSError:
+            if source.is_dir():
+                shutil.copytree(str(source), str(dest))
+            else:
+                shutil.copyfile(str(source), str(dest))
+    else:
+        os.symlink(str(source), str(dest))
 
 
 class MockDulwichRepo:
@@ -114,7 +126,7 @@ def mock_download(url: str, dest: str, **__: Any) -> None:
 
 
 class TestExecutor(Executor):
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         self._installs = []
@@ -150,7 +162,7 @@ class TestExecutor(Executor):
 
 
 class PoetryTestApplication(Application):
-    def __init__(self, poetry: Poetry):
+    def __init__(self, poetry: Poetry) -> None:
         super().__init__()
         self._poetry = poetry
 
@@ -165,7 +177,7 @@ class PoetryTestApplication(Application):
 
 
 class TestLocker(Locker):
-    def __init__(self, lock: str | Path, local_config: dict):
+    def __init__(self, lock: str | Path, local_config: dict) -> None:
         self._lock = TOMLFile(lock)
         self._local_config = local_config
         self._lock_data = None

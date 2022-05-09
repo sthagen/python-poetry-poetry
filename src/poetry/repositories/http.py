@@ -17,7 +17,6 @@ from poetry.core.packages.dependency import Dependency
 from poetry.core.packages.utils.link import Link
 from poetry.core.version.markers import parse_marker
 
-from poetry.config.config import Config
 from poetry.repositories.cached import CachedRepository
 from poetry.repositories.exceptions import PackageNotFound
 from poetry.repositories.exceptions import RepositoryError
@@ -29,6 +28,7 @@ from poetry.utils.patterns import wheel_file_re
 
 
 if TYPE_CHECKING:
+    from poetry.config.config import Config
     from poetry.inspection.info import PackageInfo
 
 
@@ -43,10 +43,11 @@ class HTTPRepository(CachedRepository, ABC):
         super().__init__(name, disable_cache)
         self._url = url
         self._authenticator = Authenticator(
-            config=config or Config(use_environment=True),
+            config=config,
             cache_id=name,
             disable_cache=disable_cache,
         )
+        self._authenticator.add_repository(name, url)
 
     @property
     def session(self) -> Authenticator:
@@ -199,7 +200,7 @@ class HTTPRepository(CachedRepository, ABC):
 
         return self._get_info_from_sdist(urls["sdist"][0])
 
-    def _links_to_data(self, links: list[Link], data: PackageInfo) -> dict:
+    def _links_to_data(self, links: list[Link], data: PackageInfo) -> dict[str, Any]:
         if not links:
             raise PackageNotFound(
                 f'No valid distribution links found for package: "{data.name}" version:'
@@ -259,7 +260,7 @@ class HTTPRepository(CachedRepository, ABC):
     def _get_response(self, endpoint: str) -> requests.Response | None:
         url = self._url + endpoint
         try:
-            response = self.session.get(url, raise_for_status=False)
+            response: requests.Response = self.session.get(url, raise_for_status=False)
             if response.status_code in (401, 403):
                 self._log(
                     f"Authorization error accessing {url}",

@@ -18,6 +18,7 @@ import requests.exceptions
 from cachecontrol import CacheControl
 from cachecontrol.caches import FileCache
 
+from poetry.config.config import Config
 from poetry.exceptions import PoetryException
 from poetry.locations import REPOSITORY_CACHE_DIR
 from poetry.utils.helpers import get_cert
@@ -30,8 +31,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cleo.io.io import IO
-
-    from poetry.config.config import Config
 
 
 logger = logging.getLogger(__name__)
@@ -84,12 +83,12 @@ class AuthenticatorRepositoryConfig:
 class Authenticator:
     def __init__(
         self,
-        config: Config,
+        config: Config | None = None,
         io: IO | None = None,
         cache_id: str | None = None,
         disable_cache: bool = False,
     ) -> None:
-        self._config = config
+        self._config = config or Config(use_environment=True)
         self._io = io
         self._sessions_for_netloc: dict[str, requests.Session] = {}
         self._credentials: dict[str, HTTPAuthCredential] = {}
@@ -120,7 +119,8 @@ class Authenticator:
         if not self.is_cached:
             return session
 
-        return CacheControl(sess=session, cache=self._cache_control)
+        session = CacheControl(sess=session, cache=self._cache_control)
+        return session
 
     def get_session(self, url: str | None = None) -> requests.Session:
         if not url:
@@ -189,7 +189,7 @@ class Authenticator:
         if verify is not None:
             verify = str(verify)
 
-        settings = session.merge_environment_settings(
+        settings = session.merge_environment_settings(  # type: ignore[no-untyped-call]
             prepared_request.url, proxies, stream, verify, cert
         )
 
@@ -323,6 +323,14 @@ class Authenticator:
 
         return self._configured_repositories
 
+    def reset_credentials_cache(self) -> None:
+        self.get_repository_config_for_url.cache_clear()
+        self._credentials = {}
+
+    def add_repository(self, name: str, url: str) -> None:
+        self.configured_repositories[name] = AuthenticatorRepositoryConfig(name, url)
+        self.reset_credentials_cache()
+
     def get_certs_for_url(self, url: str) -> dict[str, Path | None]:
         if url not in self._certs:
             self._certs[url] = self._get_certs_for_url(url)
@@ -371,3 +379,15 @@ class Authenticator:
         if selected:
             return selected.certs(config=self._config)
         return {"cert": None, "verify": None}
+
+
+_authenticator: Authenticator | None = None
+
+
+def get_default_authenticator() -> Authenticator:
+    global _authenticator
+
+    if _authenticator is None:
+        _authenticator = Authenticator()
+
+    return _authenticator
