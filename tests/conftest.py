@@ -34,6 +34,7 @@ from poetry.utils.helpers import remove_directory
 from tests.helpers import TestLocker
 from tests.helpers import TestRepository
 from tests.helpers import get_package
+from tests.helpers import isolated_environment
 from tests.helpers import mock_clone
 from tests.helpers import mock_download
 
@@ -205,7 +206,7 @@ def config(
     c.set_config_source(config_source)
     c.set_auth_config_source(auth_config_source)
 
-    mocker.patch("poetry.factory.Factory.create_config", return_value=c)
+    mocker.patch("poetry.config.config.Config.create", return_value=c)
     mocker.patch("poetry.config.config.Config.set_config_source")
 
     return c
@@ -219,7 +220,7 @@ def config_dir(tmp_dir: str) -> Path:
 @pytest.fixture(autouse=True)
 def mock_user_config_dir(mocker: MockerFixture, config_dir: Path) -> None:
     mocker.patch("poetry.locations.CONFIG_DIR", new=config_dir)
-    mocker.patch("poetry.factory.CONFIG_DIR", new=config_dir)
+    mocker.patch("poetry.config.config.CONFIG_DIR", new=config_dir)
 
 
 @pytest.fixture(autouse=True)
@@ -246,27 +247,19 @@ def pep517_metadata_mock(mocker: MockerFixture) -> None:
 
 @pytest.fixture
 def environ() -> Iterator[None]:
-    original_environ = dict(os.environ)
-
-    yield
-
-    os.environ.clear()
-    os.environ.update(original_environ)
+    with isolated_environment():
+        yield
 
 
 @pytest.fixture(autouse=True)
 def isolate_environ() -> Iterator[None]:
     """Ensure the environment is isolated from user configuration."""
-    original_environ = dict(os.environ)
+    with isolated_environment():
+        for var in os.environ:
+            if var.startswith("POETRY_") or var in {"PYTHONPATH", "VIRTUAL_ENV"}:
+                del os.environ[var]
 
-    for var in os.environ:
-        if var.startswith("POETRY_"):
-            del os.environ[var]
-
-    yield
-
-    os.environ.clear()
-    os.environ.update(original_environ)
+        yield
 
 
 @pytest.fixture(autouse=True)

@@ -186,9 +186,17 @@ class Git:
         client: GitClient
         path: str
 
-        credentials = get_default_authenticator().get_credentials_for_url(url=url)
+        kwargs: dict[str, str] = {}
+        credentials = get_default_authenticator().get_credentials_for_git_url(url=url)
+
+        if credentials.password and credentials.username:
+            # we do this conditionally as otherwise, dulwich might complain if these
+            # parameters are passed in for an ssh url
+            kwargs["username"] = credentials.username
+            kwargs["password"] = credentials.password
+
         client, path = get_transport_and_path(  # type: ignore[no-untyped-call]
-            url, username=credentials.username, password=credentials.password
+            url, **kwargs
         )
 
         with local:
@@ -349,20 +357,18 @@ class Git:
 
     @staticmethod
     def is_using_legacy_client() -> bool:
-        from poetry.factory import Factory
+        from poetry.config.config import Config
 
         legacy_client: bool = (
-            Factory.create_config()
-            .get("experimental", {})
-            .get("system-git-client", False)
+            Config.create().get("experimental", {}).get("system-git-client", False)
         )
         return legacy_client
 
     @staticmethod
     def get_default_source_root() -> Path:
-        from poetry.factory import Factory
+        from poetry.config.config import Config
 
-        return Path(Factory.create_config().get("cache-dir")) / "src"
+        return Path(Config.create().get("cache-dir")) / "src"
 
     @classmethod
     def clone(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -9,6 +10,7 @@ import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Iterator
 
 from poetry.core.masonry.utils.helpers import escape_name
 from poetry.core.masonry.utils.helpers import escape_version
@@ -17,6 +19,7 @@ from poetry.core.packages.utils.link import Link
 from poetry.core.toml.file import TOMLFile
 from poetry.core.vcs.git import ParsedUrl
 
+from poetry.config.config import Config
 from poetry.console.application import Application
 from poetry.factory import Factory
 from poetry.installation.executor import Executor
@@ -107,7 +110,7 @@ def mock_clone(
     folder = Path(__file__).parent / "fixtures" / "git" / parsed.resource / path
 
     if not source_root:
-        source_root = Path(Factory.create_config().get("cache-dir")) / "src"
+        source_root = Path(Config.create().get("cache-dir")) / "src"
 
     dest = source_root / path
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -229,3 +232,21 @@ class TestRepository(Repository):
                 f"-{escape_version(package.version.text)}-py2.py3-none-any.whl"
             )
         ]
+
+
+@contextlib.contextmanager
+def isolated_environment(
+    environ: dict[str, Any] | None = None, clear: bool = False
+) -> Iterator[None]:
+    original_environ = dict(os.environ)
+
+    if clear:
+        os.environ.clear()
+
+    if environ:
+        os.environ.update(environ)
+
+    yield
+
+    os.environ.clear()
+    os.environ.update(original_environ)
