@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from typing import Iterable
-from typing import Sequence
 
 from cleo.io.null_io import NullIO
 
@@ -20,6 +18,9 @@ from poetry.utils.helpers import pluralize
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from collections.abc import Sequence
+
     from cleo.io.io import IO
     from poetry.core.packages.project_package import ProjectPackage
 
@@ -58,9 +59,9 @@ class Installer:
         self._execute_operations = True
         self._lock = False
 
-        self._whitelist = []
+        self._whitelist: list[str] = []
 
-        self._extras = []
+        self._extras: list[str] = []
 
         if executor is None:
             executor = Executor(self._env, self._pool, config, self._io)
@@ -171,7 +172,7 @@ class Installer:
 
         return self
 
-    def extras(self, extras: list) -> Installer:
+    def extras(self, extras: list[str]) -> Installer:
         self._extras = extras
 
         return self
@@ -182,7 +183,7 @@ class Installer:
         return self
 
     def _do_refresh(self) -> int:
-        from poetry.puzzle import Solver
+        from poetry.puzzle.solver import Solver
 
         # Checking extras
         for extra in self._extras:
@@ -211,7 +212,7 @@ class Installer:
         return 0
 
     def _do_install(self, local_repo: Repository) -> int:
-        from poetry.puzzle import Solver
+        from poetry.puzzle.solver import Solver
 
         locked_repository = Repository()
         if self._update:
@@ -475,9 +476,9 @@ class Installer:
 
     def _get_operations_from_lock(
         self, locked_repository: Repository
-    ) -> Sequence[Operation]:
+    ) -> list[Operation]:
         installed_repo = self._installed_repository
-        ops = []
+        ops: list[Operation] = []
 
         extra_packages = self._get_extra_packages(locked_repository)
         for locked in locked_repository.packages:

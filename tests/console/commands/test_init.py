@@ -6,7 +6,6 @@ import sys
 
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Iterator
 
 import pytest
 
@@ -20,6 +19,8 @@ from tests.helpers import get_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from _pytest.fixtures import FixtureRequest
     from poetry.core.packages.package import Package
     from pytest_mock import MockerFixture
@@ -171,6 +172,50 @@ flask = "^2.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^3.6.0"
+"""
+
+    assert expected in tester.io.fetch_output()
+
+
+# Regression test for https://github.com/python-poetry/poetry/issues/2355
+def test_interactive_with_dependencies_and_no_selection(
+    tester: CommandTester, repo: TestRepository
+):
+    repo.add_package(get_package("django-pendulum", "0.1.6-pre4"))
+    repo.add_package(get_package("pendulum", "2.0.0"))
+    repo.add_package(get_package("pytest", "3.6.0"))
+
+    inputs = [
+        "my-package",  # Package name
+        "1.2.3",  # Version
+        "This is a description",  # Description
+        "n",  # Author
+        "MIT",  # License
+        "~2.7 || ^3.6",  # Python
+        "",  # Interactive packages
+        "pendulu",  # Search for package
+        "",  # Do not select an option
+        "",  # Stop searching for packages
+        "",  # Interactive dev packages
+        "pytest",  # Search for package
+        "",  # Do not select an option
+        "",
+        "",
+        "\n",  # Generate
+    ]
+    tester.execute(inputs="\n".join(inputs))
+    expected = """\
+[tool.poetry]
+name = "my-package"
+version = "1.2.3"
+description = "This is a description"
+authors = ["Your Name <you@example.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "my_package"}]
+
+[tool.poetry.dependencies]
+python = "~2.7 || ^3.6"
 """
 
     assert expected in tester.io.fetch_output()
