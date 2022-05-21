@@ -19,6 +19,7 @@ from poetry.mixology.result import SolverResult
 from poetry.mixology.set_relation import SetRelation
 from poetry.mixology.term import Term
 from poetry.packages import DependencyPackage
+from poetry.utils._compat import metadata
 
 
 if TYPE_CHECKING:
@@ -42,16 +43,25 @@ class DependencyCache:
     def __init__(self, provider: Provider) -> None:
         self.provider = provider
         self.cache: dict[
-            tuple[str, str | None, str | None, str | None], list[DependencyPackage]
+            tuple[str, str | None, str | None, str | None, str | None],
+            list[DependencyPackage],
         ] = {}
 
-    @functools.lru_cache(maxsize=128)
-    def search_for(self, dependency: Dependency) -> list[DependencyPackage]:
+        # TODO: re-enable cache when poetry-core upgrade is completed
+        self.search_for = functools.lru_cache(
+            maxsize=128
+            if metadata.version("poetry-core")  # type: ignore[no-untyped-call]
+            != "1.1.0a7"
+            else 0
+        )(self._search_for)
+
+    def _search_for(self, dependency: Dependency) -> list[DependencyPackage]:
         key = (
             dependency.complete_name,
             dependency.source_type,
             dependency.source_url,
             dependency.source_reference,
+            dependency.source_subdirectory,
         )
 
         packages = self.cache.get(key)
