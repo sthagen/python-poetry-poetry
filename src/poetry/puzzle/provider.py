@@ -53,7 +53,6 @@ if TYPE_CHECKING:
     from poetry.core.version.markers import BaseMarker
 
     from poetry.repositories import Pool
-    from poetry.repositories import Repository
     from poetry.utils.env import Env
 
 
@@ -127,7 +126,7 @@ class Provider:
         pool: Pool,
         io: IO,
         env: Env | None = None,
-        installed: Repository | None = None,
+        installed: list[Package] | None = None,
     ) -> None:
         self._package = package
         self._pool = pool
@@ -140,7 +139,7 @@ class Provider:
         self._deferred_cache: dict[Dependency, Package] = {}
         self._load_deferred = True
         self._source_root: Path | None = None
-        self._installed = installed
+        self._installed_packages = installed if installed is not None else []
 
     @property
     def pool(self) -> Pool:
@@ -201,7 +200,7 @@ class Provider:
         This is useful when dealing with packages that are under development, not
         published on package sources and/or only available via system installations.
         """
-        if not self._installed:
+        if not self._installed_packages:
             return []
 
         logger.debug(
@@ -210,7 +209,7 @@ class Provider:
         )
         packages = [
             package
-            for package in self._installed.packages
+            for package in self._installed_packages
             if package.provides(specification)
         ]
         logger.debug(
@@ -697,8 +696,8 @@ class Provider:
                 for dep_any in any_markers_dependencies:
                     dep_any.marker = inverted_marker
                     for dep_other in other_markers_dependencies:
-                        dep_other.set_constraint(
-                            dep_other.constraint.intersect(dep_any.constraint)
+                        dep_other.constraint = dep_other.constraint.intersect(
+                            dep_any.constraint
                         )
             elif not inverted_marker.is_empty() and self._python_constraint.allows_any(
                 get_python_constraint_from_marker(inverted_marker)

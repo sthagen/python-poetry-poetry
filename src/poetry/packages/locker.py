@@ -102,10 +102,10 @@ class Locker:
         from poetry.repositories import Repository
 
         if not self.is_locked():
-            return Repository()
+            return Repository("poetry-locked")
 
         lock_data = self.lock_data
-        packages = Repository()
+        packages = Repository("poetry-locked")
         locked_packages = cast("list[dict[str, Any]]", lock_data["package"])
 
         if not locked_packages:
@@ -269,11 +269,12 @@ class Locker:
             requirement = locked_package.to_dependency()
             requirement.marker = requirement.marker.intersect(marker)
 
-            requirement.set_constraint(constraint)
+            requirement.constraint = constraint
 
             for require in locked_package.requires:
-                if require.in_extras and locked_package.features.isdisjoint(
-                    require.in_extras
+                if require.is_optional() and not any(
+                    require in locked_package.extras[feature]
+                    for feature in locked_package.features
                 ):
                     continue
 
