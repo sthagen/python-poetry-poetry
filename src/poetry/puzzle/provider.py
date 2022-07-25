@@ -426,7 +426,7 @@ class Provider:
         return _dependencies
 
     def incompatibilities_for(
-        self, package: DependencyPackage
+        self, dependency_package: DependencyPackage
     ) -> list[Incompatibility]:
         """
         Returns incompatibilities that encapsulate a given package's dependencies,
@@ -437,6 +437,7 @@ class Provider:
         won't return incompatibilities that have already been returned by a
         previous call to _incompatibilities_for().
         """
+        package = dependency_package.package
         if package.is_root():
             dependencies = package.all_requires
         else:
@@ -444,7 +445,7 @@ class Provider:
 
             if not package.python_constraint.allows_all(self._python_constraint):
                 transitive_python_constraint = get_python_constraint_from_marker(
-                    package.dependency.transitive_marker
+                    dependency_package.dependency.transitive_marker
                 )
                 intersection = package.python_constraint.intersect(
                     transitive_python_constraint
@@ -457,7 +458,7 @@ class Provider:
                 if (
                     transitive_python_constraint.is_any()
                     or self._python_constraint.intersect(
-                        package.dependency.python_constraint
+                        dependency_package.dependency.python_constraint
                     ).is_empty()
                     or intersection.is_empty()
                     or not difference.is_empty()
@@ -478,7 +479,9 @@ class Provider:
             and self._python_constraint.allows_any(dep.python_constraint)
             and (not self._env or dep.marker.validate(self._env.marker_env))
         ]
-        dependencies = self._get_dependencies_with_overrides(_dependencies, package)
+        dependencies = self._get_dependencies_with_overrides(
+            _dependencies, dependency_package
+        )
 
         return [
             Incompatibility(
@@ -488,39 +491,44 @@ class Provider:
             for dep in dependencies
         ]
 
-    def complete_package(self, package: DependencyPackage) -> DependencyPackage:
+    def complete_package(
+        self, dependency_package: DependencyPackage
+    ) -> DependencyPackage:
+        package = dependency_package.package
+        dependency = dependency_package.dependency
+
         if package.is_root():
-            package = package.clone()
+            dependency_package = dependency_package.clone()
+            package = dependency_package.package
+            dependency = dependency_package.dependency
             requires = package.all_requires
-        elif not package.is_root() and package.source_type not in {
+        elif package.source_type not in {
             "directory",
             "file",
             "url",
             "git",
         }:
             try:
-                package = DependencyPackage(
-                    package.dependency,
+                dependency_package = DependencyPackage(
+                    dependency,
                     self._pool.package(
                         package.name,
                         package.version.text,
-                        extras=list(package.dependency.extras),
-                        repository=package.dependency.source_name,
+                        extras=list(dependency.extras),
+                        repository=dependency.source_name,
                     ),
                 )
             except PackageNotFound as e:
                 try:
-                    package = next(
-                        DependencyPackage(
-                            package.dependency,
-                            pkg,
-                        )
-                        for pkg in self.search_for_installed_packages(
-                            package.dependency
-                        )
+                    dependency_package = next(
+                        DependencyPackage(dependency, pkg)
+                        for pkg in self.search_for_installed_packages(dependency)
                     )
                 except StopIteration:
                     raise e from e
+
+            package = dependency_package.package
+            dependency = dependency_package.dependency
             requires = package.requires
         else:
             requires = package.requires
@@ -537,15 +545,19 @@ class Provider:
         # If some extras/features were required, we need to
         # add a special dependency representing the base package
         # to the current package
-        if package.dependency.extras:
-            for extra in package.dependency.extras:
+        if dependency.extras:
+            for extra in dependency.extras:
                 extra = safe_extra(extra)
                 if extra not in package.extras:
                     continue
 
                 optional_dependencies += [d.name for d in package.extras[extra]]
 
-            package = package.with_features(list(package.dependency.extras))
+            dependency_package = dependency_package.with_features(
+                list(dependency.extras)
+            )
+            package = dependency_package.package
+            dependency = dependency_package.dependency
             _dependencies.append(package.without_features().to_dependency())
 
         for dep in requires:
@@ -563,7 +575,7 @@ class Provider:
                 or (
                     dep.in_extras
                     and not set(dep.in_extras).intersection(
-                        {safe_extra(extra) for extra in package.dependency.extras}
+                        {safe_extra(extra) for extra in dependency.extras}
                     )
                 )
             ):
@@ -571,7 +583,9 @@ class Provider:
 
             _dependencies.append(dep)
 
-        dependencies = self._get_dependencies_with_overrides(_dependencies, package)
+        dependencies = self._get_dependencies_with_overrides(
+            _dependencies, dependency_package
+        )
 
         # Searching for duplicate dependencies
         #
@@ -727,9 +741,11 @@ class Provider:
             for dep in deps:
                 if not overrides_marker_intersection.intersect(dep.marker).is_empty():
                     current_overrides = self._overrides.copy()
-                    package_overrides = current_overrides.get(package, {}).copy()
+                    package_overrides = current_overrides.get(
+                        dependency_package, {}
+                    ).copy()
                     package_overrides.update({dep.name: dep})
-                    current_overrides.update({package: package_overrides})
+                    current_overrides.update({dependency_package: package_overrides})
                     overrides.append(current_overrides)
 
             if overrides:
@@ -738,9 +754,9 @@ class Provider:
         # Modifying dependencies as needed
         clean_dependencies = []
         for dep in dependencies:
-            if not package.dependency.transitive_marker.without_extras().is_any():
+            if not dependency.transitive_marker.without_extras().is_any():
                 marker_intersection = (
-                    package.dependency.transitive_marker.without_extras().intersect(
+                    dependency.transitive_marker.without_extras().intersect(
                         dep.marker.without_extras()
                     )
                 )
@@ -752,9 +768,9 @@ class Provider:
 
                 dep.transitive_marker = marker_intersection
 
-            if not package.dependency.python_constraint.is_any():
+            if not dependency.python_constraint.is_any():
                 python_constraint_intersection = dep.python_constraint.intersect(
-                    package.dependency.python_constraint
+                    dependency.python_constraint
                 )
                 if python_constraint_intersection.is_empty():
                     # This dependency is not needed under current python constraint.
@@ -763,14 +779,13 @@ class Provider:
 
             clean_dependencies.append(dep)
 
-        package = DependencyPackage(
-            package.dependency, package.with_dependency_groups([], only=True)
-        )
+        package = package.with_dependency_groups([], only=True)
+        dependency_package = DependencyPackage(dependency, package)
 
         for dep in clean_dependencies:
             package.add_dependency(dep)
 
-        return package
+        return dependency_package
 
     def debug(self, message: str, depth: int = 0) -> None:
         if not (self._io.is_very_verbose() or self._io.is_debug()):
