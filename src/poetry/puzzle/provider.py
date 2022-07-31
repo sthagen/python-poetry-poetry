@@ -141,6 +141,7 @@ class Provider:
         self._load_deferred = True
         self._source_root: Path | None = None
         self._installed_packages = installed if installed is not None else []
+        self._direct_origin_packages: dict[str, Package] = {}
 
     @property
     def pool(self) -> Pool:
@@ -269,18 +270,32 @@ class Provider:
             return PackageCollection(dependency, [self._package])
 
         if dependency.is_direct_origin():
-            packages = [self.search_for_direct_origin_dependency(dependency)]
+            package = self.search_for_direct_origin_dependency(dependency)
+            self._direct_origin_packages[dependency.name] = package
+            return PackageCollection(dependency, [package])
 
-        else:
-            packages = self._pool.find_packages(dependency)
-
-            packages.sort(
-                key=lambda p: (
-                    not p.is_prerelease() and not dependency.allows_prereleases(),
-                    p.version,
-                ),
-                reverse=True,
+        # If we've previously found a direct-origin package that meets this dependency,
+        # use it.
+        #
+        # We rely on the VersionSolver resolving direct-origin dependencies first.
+        direct_origin_package = self._direct_origin_packages.get(dependency.name)
+        if direct_origin_package is not None:
+            packages = (
+                [direct_origin_package]
+                if dependency.constraint.allows(direct_origin_package.version)
+                else []
             )
+            return PackageCollection(dependency, packages)
+
+        packages = self._pool.find_packages(dependency)
+
+        packages.sort(
+            key=lambda p: (
+                not p.is_prerelease() and not dependency.allows_prereleases(),
+                p.version,
+            ),
+            reverse=True,
+        )
 
         if not packages:
             packages = self.search_for_installed_packages(dependency)
@@ -670,10 +685,10 @@ class Provider:
             #   - {<Package foo (1.2.3): {"bar": <Dependency bar (<2.0)>}
 
             def fmt_warning(d: Dependency) -> str:
-                marker = d.marker if not d.marker.is_any() else "*"
+                dependency_marker = d.marker if not d.marker.is_any() else "*"
                 return (
                     f"<c1>{d.name}</c1> <fg=default>(<c2>{d.pretty_constraint}</c2>)</>"
-                    f" with markers <b>{marker}</b>"
+                    f" with markers <b>{dependency_marker}</b>"
                 )
 
             warnings = ", ".join(fmt_warning(d) for d in deps[:-1])
