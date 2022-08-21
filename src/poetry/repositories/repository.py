@@ -12,9 +12,11 @@ from poetry.repositories.exceptions import PackageNotFound
 
 
 if TYPE_CHECKING:
+    from packaging.utils import NormalizedName
     from poetry.core.packages.dependency import Dependency
     from poetry.core.packages.package import Package
     from poetry.core.packages.utils.link import Link
+    from poetry.core.semver.version import Version
 
 
 class Repository:
@@ -35,30 +37,28 @@ class Repository:
 
     def find_packages(self, dependency: Dependency) -> list[Package]:
         packages = []
-        ignored_pre_release_packages = []
         constraint, allow_prereleases = self._get_constraints_from_dependency(
             dependency
         )
+        ignored_pre_release_packages = []
 
-        for package in self.packages:
-            if dependency.name == package.name:
-                if (
-                    package.is_prerelease()
-                    and not allow_prereleases
-                    and not package.source_type
-                ):
-                    # If prereleases are not allowed and the package is a prerelease
-                    # and is a standard package then we skip it
-                    if constraint.is_any():
-                        # we need this when all versions of the package are pre-releases
-                        ignored_pre_release_packages.append(package)
-                    continue
+        for package in self._find_packages(dependency.name, constraint):
+            if (
+                package.is_prerelease()
+                and not allow_prereleases
+                and not package.is_direct_origin()
+            ):
+                if constraint.is_any():
+                    # we need this when all versions of the package are pre-releases
+                    ignored_pre_release_packages.append(package)
+                continue
 
-                if constraint.allows(package.version) or (
-                    package.is_prerelease()
-                    and constraint.allows(package.version.next_patch())
-                ):
-                    packages.append(package)
+            packages.append(package)
+
+        self._log(
+            f"{len(packages)} packages found for {dependency.name} {constraint!s}",
+            level="debug",
+        )
 
         return packages or ignored_pre_release_packages
 
@@ -114,6 +114,15 @@ class Repository:
 
         return constraint, allow_prereleases
 
+    def _find_packages(
+        self, name: NormalizedName, constraint: VersionConstraint
+    ) -> list[Package]:
+        return [
+            package
+            for package in self._packages
+            if package.name == name and constraint.allows(package.version)
+        ]
+
     def _log(self, msg: str, level: str = "info") -> None:
         logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         getattr(logger, level)(f"<c1>Source ({self.name}):</c1> {msg}")
@@ -125,12 +134,10 @@ class Repository:
         return []
 
     def package(
-        self, name: str, version: str, extras: list[str] | None = None
+        self, name: NormalizedName, version: Version, extras: list[str] | None = None
     ) -> Package:
-        name = name.lower()
-
         for package in self.packages:
-            if name == package.name and package.version.text == version:
+            if name == package.name and package.version == version:
                 return package.clone()
 
         raise PackageNotFound(f"Package {name} ({version}) not found.")
