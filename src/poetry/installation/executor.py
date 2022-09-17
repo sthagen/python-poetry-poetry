@@ -28,6 +28,7 @@ from poetry.installation.operations import Update
 from poetry.utils._compat import decode
 from poetry.utils.authenticator import Authenticator
 from poetry.utils.env import EnvCommandError
+from poetry.utils.helpers import atomic_open
 from poetry.utils.helpers import pluralize
 from poetry.utils.helpers import remove_directory
 from poetry.utils.pip import pip_install
@@ -53,13 +54,16 @@ class Executor:
         config: Config,
         io: IO,
         parallel: bool | None = None,
+        disable_cache: bool = False,
     ) -> None:
         self._env = env
         self._io = io
         self._dry_run = False
         self._enabled = True
         self._verbose = False
-        self._authenticator = Authenticator(config, self._io)
+        self._authenticator = Authenticator(
+            config, self._io, disable_cache=disable_cache
+        )
         self._chef = Chef(config, self._env)
         self._chooser = Chooser(pool, self._env, config)
 
@@ -695,7 +699,7 @@ class Executor:
         done = 0
         archive = self._chef.get_cache_directory_for_link(link) / link.filename
         archive.parent.mkdir(parents=True, exist_ok=True)
-        with archive.open("wb") as f:
+        with atomic_open(archive) as f:
             for chunk in response.iter_content(chunk_size=4096):
                 if not chunk:
                     break
