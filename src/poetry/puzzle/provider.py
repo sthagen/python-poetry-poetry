@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class Indicator(ProgressIndicator):  # type: ignore[misc]
+class Indicator(ProgressIndicator):
     CONTEXT: str | None = None
 
     @staticmethod
@@ -853,17 +853,7 @@ class Provider:
         locked = self._locked.get(dependency.name, [])
         for dependency_package in locked:
             package = dependency_package.package
-            if (
-                # Locked dependencies are always without features.
-                # Thus, we can't use is_same_package_as() here because it compares
-                # the complete_name (including features).
-                dependency.name == package.name
-                and (
-                    dependency.source_type is None
-                    or dependency.is_same_source_as(package)
-                )
-                and dependency.constraint.allows(package.version)
-            ):
+            if package.satisfies(dependency):
                 return DependencyPackage(dependency, package)
         return None
 
