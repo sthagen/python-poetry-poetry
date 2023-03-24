@@ -1533,12 +1533,12 @@ class Env:
                     stderr=stderr,
                     input=encode(input_),
                     check=True,
+                    env=env,
                     **kwargs,
                 ).stdout
             elif call:
-                return subprocess.call(
-                    cmd, stdout=subprocess.PIPE, stderr=stderr, env=env, **kwargs
-                )
+                assert stderr != subprocess.PIPE
+                return subprocess.call(cmd, stderr=stderr, env=env, **kwargs)
             else:
                 output = subprocess.check_output(cmd, stderr=stderr, env=env, **kwargs)
         except CalledProcessError as e:
