@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from poetry.poetry import Poetry
     from tests.conftest import Config
+    from tests.types import FixtureDirGetter
     from tests.types import ProjectFactory
 
 MINIMAL_SCRIPT = """\
@@ -77,9 +78,8 @@ class MockVirtualEnv(VirtualEnv):
 
 
 @pytest.fixture()
-def poetry(project_factory: ProjectFactory) -> Poetry:
-    fixture = Path(__file__).parent.parent / "fixtures" / "simple_project"
-    return project_factory("simple", source=fixture)
+def poetry(project_factory: ProjectFactory, fixture_dir: FixtureDirGetter) -> Poetry:
+    return project_factory("simple", source=fixture_dir("simple_project"))
 
 
 @pytest.fixture()
@@ -100,7 +100,7 @@ def test_virtualenvs_with_spaces_in_their_path_work_as_expected(
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires darwin")
-def test_venv_backup_exclusion(tmp_path: Path, manager: EnvManager):
+def test_venv_backup_exclusion(tmp_path: Path, manager: EnvManager) -> None:
     import xattr
 
     venv_path = tmp_path / "Virtual Env"
@@ -208,6 +208,52 @@ def check_output_wrapper(
     return check_output
 
 
+def test_activate_in_project_venv_no_explicit_config(
+    tmp_path: Path,
+    manager: EnvManager,
+    poetry: Poetry,
+    mocker: MockerFixture,
+    venv_name: str,
+    in_project_venv_dir: Path,
+) -> None:
+    mocker.patch("shutil.which", side_effect=lambda py: f"/usr/bin/{py}")
+    mocker.patch(
+        "subprocess.check_output",
+        side_effect=check_output_wrapper(),
+    )
+    mocker.patch(
+        "subprocess.Popen.communicate",
+        side_effect=[
+            ("/prefix", None),
+            ('{"version_info": [3, 7, 0]}', None),
+            ("/prefix", None),
+            ("/prefix", None),
+            ("/prefix", None),
+        ],
+    )
+    m = mocker.patch("poetry.utils.env.EnvManager.build_venv", side_effect=build_venv)
+
+    env = manager.activate("python3.7")
+
+    assert env.path == tmp_path / "poetry-fixture-simple" / ".venv"
+    assert env.base == Path("/prefix")
+
+    m.assert_called_with(
+        tmp_path / "poetry-fixture-simple" / ".venv",
+        executable=Path("/usr/bin/python3.7"),
+        flags={
+            "always-copy": False,
+            "system-site-packages": False,
+            "no-pip": False,
+            "no-setuptools": False,
+        },
+        prompt="simple-project-py3.7",
+    )
+
+    envs_file = TOMLFile(tmp_path / "envs.toml")
+    assert not envs_file.exists()
+
+
 def test_activate_activates_non_existing_virtualenv_no_envs_file(
     tmp_path: Path,
     manager: EnvManager,
@@ -248,7 +294,7 @@ def test_activate_activates_non_existing_virtualenv_no_envs_file(
 
     envs_file = TOMLFile(tmp_path / "envs.toml")
     assert envs_file.exists()
-    envs = envs_file.read()
+    envs: dict[str, Any] = envs_file.read()
     assert envs[venv_name]["minor"] == "3.7"
     assert envs[venv_name]["patch"] == "3.7.1"
 
@@ -312,7 +358,7 @@ def test_activate_activates_existing_virtualenv_no_envs_file(
 
     envs_file = TOMLFile(tmp_path / "envs.toml")
     assert envs_file.exists()
-    envs = envs_file.read()
+    envs: dict[str, Any] = envs_file.read()
     assert envs[venv_name]["minor"] == "3.7"
     assert envs[venv_name]["patch"] == "3.7.1"
 
@@ -356,7 +402,7 @@ def test_activate_activates_same_virtualenv_with_envs_file(
     m.assert_not_called()
 
     assert envs_file.exists()
-    envs = envs_file.read()
+    envs: dict[str, Any] = envs_file.read()
     assert envs[venv_name]["minor"] == "3.7"
     assert envs[venv_name]["patch"] == "3.7.1"
 
@@ -410,7 +456,7 @@ def test_activate_activates_different_virtualenv_with_envs_file(
     )
 
     assert envs_file.exists()
-    envs = envs_file.read()
+    envs: dict[str, Any] = envs_file.read()
     assert envs[venv_name]["minor"] == "3.6"
     assert envs[venv_name]["patch"] == "3.6.6"
 
@@ -476,7 +522,7 @@ def test_activate_activates_recreates_for_different_patch(
     remove_venv_m.assert_called_with(tmp_path / f"{venv_name}-py3.7")
 
     assert envs_file.exists()
-    envs = envs_file.read()
+    envs: dict[str, Any] = envs_file.read()
     assert envs[venv_name]["minor"] == "3.7"
     assert envs[venv_name]["patch"] == "3.7.1"
 
@@ -528,7 +574,7 @@ def test_activate_does_not_recreate_when_switching_minor(
     remove_venv_m.assert_not_called()
 
     assert envs_file.exists()
-    envs = envs_file.read()
+    envs: dict[str, Any] = envs_file.read()
     assert envs[venv_name]["minor"] == "3.6"
     assert envs[venv_name]["patch"] == "3.6.6"
 
@@ -901,8 +947,8 @@ def test_remove_keeps_dir_if_not_deleteable(
         side_effect=check_output_wrapper(Version.parse("3.6.6")),
     )
 
-    def err_on_rm_venv_only(path: Path | str, *args: Any, **kwargs: Any) -> None:
-        if str(path) == str(venv_path):
+    def err_on_rm_venv_only(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path.resolve() == venv_path.resolve():
             raise OSError(16, "Test error")  # ERRNO 16: Device or resource busy
         else:
             remove_directory(path)
@@ -966,11 +1012,11 @@ def test_call_with_input_and_keyboard_interrupt(
 def test_call_no_input_with_keyboard_interrupt(
     tmp_path: Path, tmp_venv: VirtualEnv, mocker: MockerFixture
 ) -> None:
-    mocker.patch("subprocess.call", side_effect=KeyboardInterrupt())
+    mocker.patch("subprocess.check_call", side_effect=KeyboardInterrupt())
     kwargs = {"call": True}
     with pytest.raises(KeyboardInterrupt):
         tmp_venv.run("python", "-", **kwargs)
-    subprocess.call.assert_called_once()
+    subprocess.check_call.assert_called_once()
 
 
 def test_run_with_called_process_error(
@@ -1010,7 +1056,7 @@ def test_call_no_input_with_called_process_error(
     tmp_path: Path, tmp_venv: VirtualEnv, mocker: MockerFixture
 ) -> None:
     mocker.patch(
-        "subprocess.call",
+        "subprocess.check_call",
         side_effect=subprocess.CalledProcessError(
             42, "some_command", "some output", "some error"
         ),
@@ -1018,7 +1064,7 @@ def test_call_no_input_with_called_process_error(
     kwargs = {"call": True}
     with pytest.raises(EnvCommandError) as error:
         tmp_venv.run("python", "-", **kwargs)
-    subprocess.call.assert_called_once()
+    subprocess.check_call.assert_called_once()
     assert "some output" in str(error.value)
     assert "some error" in str(error.value)
 
@@ -1042,7 +1088,7 @@ def test_check_output_with_called_process_error(
 @pytest.mark.parametrize("out", ["sys.stdout", "sys.stderr"])
 def test_call_does_not_block_on_full_pipe(
     tmp_path: Path, tmp_venv: VirtualEnv, out: str
-):
+) -> None:
     """see https://github.com/python-poetry/poetry/issues/7698"""
     script = tmp_path / "script.py"
     script.write_text(
@@ -1054,9 +1100,10 @@ for i in range(10000):
     )
 
     def target(result: list[int]) -> None:
-        result.append(tmp_venv.run("python", str(script), call=True))
+        tmp_venv.run("python", str(script), call=True)
+        result.append(0)
 
-    results = []
+    results: list[int] = []
     # use a separate thread, so that the test does not block in case of error
     thread = Thread(target=target, args=(results,))
     thread.start()
@@ -1259,6 +1306,7 @@ def test_create_venv_uses_patch_version_to_detect_compatibility(
         str(c) for c in sys.version_info[:3]
     )
 
+    assert version.patch is not None
     mocker.patch("sys.version_info", (version.major, version.minor, version.patch + 1))
     check_output = mocker.patch(
         "subprocess.check_output",
@@ -1296,6 +1344,7 @@ def test_create_venv_uses_patch_version_to_detect_compatibility_with_executable(
         del os.environ["VIRTUAL_ENV"]
 
     version = Version.from_parts(*sys.version_info[:3])
+    assert version.minor is not None
     poetry.package.python_versions = f"~{version.major}.{version.minor - 1}.0"
     venv_name = manager.generate_env_name("simple-project", str(poetry.file.parent))
 
@@ -1334,6 +1383,7 @@ def test_create_venv_fails_if_current_python_version_is_not_supported(
     manager.create_venv()
 
     current_version = Version.parse(".".join(str(c) for c in sys.version_info[:3]))
+    assert current_version.minor is not None
     next_version = ".".join(
         str(c) for c in (current_version.major, current_version.minor + 1, 0)
     )
@@ -1378,7 +1428,7 @@ def test_activate_with_in_project_setting_does_not_fail_if_no_venvs_dir(
     )
     mocker.patch(
         "subprocess.Popen.communicate",
-        side_effect=[("/prefix", None), ("/prefix", None)],
+        side_effect=[("/prefix", None), ("/prefix", None), ("/prefix", None)],
     )
     m = mocker.patch("poetry.utils.env.EnvManager.build_venv")
 
@@ -1664,10 +1714,8 @@ def test_generate_env_name_uses_real_path(
 
 
 @pytest.fixture()
-def extended_without_setup_poetry() -> Poetry:
-    poetry = Factory().create_poetry(
-        Path(__file__).parent.parent / "fixtures" / "extended_project_without_setup"
-    )
+def extended_without_setup_poetry(fixture_dir: FixtureDirGetter) -> Poetry:
+    poetry = Factory().create_poetry(fixture_dir("extended_project_without_setup"))
 
     return poetry
 
@@ -1713,6 +1761,7 @@ def test_build_environment_not_called_without_build_script_specified(
 
 
 def test_create_venv_project_name_empty_sets_correct_prompt(
+    fixture_dir: FixtureDirGetter,
     project_factory: ProjectFactory,
     config: Config,
     mocker: MockerFixture,
@@ -1721,8 +1770,7 @@ def test_create_venv_project_name_empty_sets_correct_prompt(
     if "VIRTUAL_ENV" in os.environ:
         del os.environ["VIRTUAL_ENV"]
 
-    fixture = Path(__file__).parent.parent / "fixtures" / "no_name_project"
-    poetry = project_factory("no", source=fixture)
+    poetry = project_factory("no", source=fixture_dir("no_name_project"))
     manager = EnvManager(poetry)
 
     poetry.package.python_versions = "^3.7"

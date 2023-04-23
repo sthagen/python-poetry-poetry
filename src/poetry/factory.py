@@ -9,6 +9,7 @@ from typing import Any
 from typing import cast
 
 from cleo.io.null_io import NullIO
+from packaging.utils import canonicalize_name
 from poetry.core.factory import Factory as BaseFactory
 from poetry.core.packages.dependency_group import MAIN_GROUP
 from poetry.core.packages.project_package import ProjectPackage
@@ -123,6 +124,7 @@ class Factory(BaseFactory):
         disable_cache: bool = False,
     ) -> RepositoryPool:
         from poetry.repositories import RepositoryPool
+        from poetry.repositories.repository_pool import Priority
 
         if io is None:
             io = NullIO()
@@ -136,31 +138,46 @@ class Factory(BaseFactory):
             repository = cls.create_package_source(
                 source, auth_config, disable_cache=disable_cache
             )
-            is_default = source.get("default", False)
-            is_secondary = source.get("secondary", False)
+            priority = Priority[source.get("priority", Priority.PRIMARY.name).upper()]
+            if "default" in source or "secondary" in source:
+                warning = (
+                    "Found deprecated key 'default' or 'secondary' in"
+                    " pyproject.toml configuration for source"
+                    f" {source.get('name')}. Please provide the key 'priority'"
+                    " instead. Accepted values are:"
+                    f" {', '.join(repr(p.name.lower()) for p in Priority)}."
+                )
+                io.write_error_line(f"<warning>Warning: {warning}</warning>")
+                if source.get("default"):
+                    priority = Priority.DEFAULT
+                elif source.get("secondary"):
+                    priority = Priority.SECONDARY
+
             if io.is_debug():
                 message = f"Adding repository {repository.name} ({repository.url})"
-                if is_default:
+                if priority is Priority.DEFAULT:
                     message += " and setting it as the default one"
-                elif is_secondary:
-                    message += " and setting it as secondary"
+                else:
+                    message += f" and setting it as {priority.name.lower()}"
 
                 io.write_line(message)
 
-            pool.add_repository(repository, is_default, secondary=is_secondary)
+            pool.add_repository(repository, priority=priority)
 
-        # Put PyPI last to prefer private repositories
-        # unless we have no default source AND no primary sources
-        # (default = false, secondary = false)
+        # Only add PyPI if no default repository is configured
         if pool.has_default():
             if io.is_debug():
                 io.write_line("Deactivating the PyPI repository")
         else:
             from poetry.repositories.pypi_repository import PyPiRepository
 
-            default = not pool.has_primary_repositories()
+            if pool.has_primary_repositories():
+                pypi_priority = Priority.SECONDARY
+            else:
+                pypi_priority = Priority.DEFAULT
+
             pool.add_repository(
-                PyPiRepository(disable_cache=disable_cache), default, not default
+                PyPiRepository(disable_cache=disable_cache), priority=pypi_priority
             )
 
         return pool
@@ -302,5 +319,19 @@ class Factory(BaseFactory):
         results = super().validate(config, strict)
 
         results["errors"].extend(validate_object(config))
+
+        # A project should not depend on itself.
+        dependencies = set(config.get("dependencies", {}).keys())
+        dependencies.update(config.get("dev-dependencies", {}).keys())
+        groups = config.get("group", {}).values()
+        for group in groups:
+            dependencies.update(group.get("dependencies", {}).keys())
+
+        dependencies = {canonicalize_name(d) for d in dependencies}
+
+        if canonicalize_name(config["name"]) in dependencies:
+            results["errors"].append(
+                f"Project name ({config['name']}) is same as one of its dependencies"
+            )
 
         return results
