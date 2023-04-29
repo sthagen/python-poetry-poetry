@@ -921,9 +921,7 @@ def test_init_existing_pyproject_consistent_linesep(
     existing_section = """
 [tool.black]
 line-length = 88
-""".replace(
-        "\n", linesep
-    )
+""".replace("\n", linesep)
     with open(pyproject_file, "w", newline="") as f:
         f.write(existing_section)
     tester.execute(inputs=init_basic_inputs)
@@ -1049,10 +1047,7 @@ def test_package_include(
         ),
     )
 
-    if include is None:
-        packages = ""
-    else:
-        packages = f'packages = [{{include = "{include}"}}]\n'
+    packages = "" if include is None else f'packages = [{{include = "{include}"}}]\n'
 
     expected = (
         f"[tool.poetry]\n"
