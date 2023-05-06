@@ -24,6 +24,7 @@ from poetry.inspection.info import PackageInfoError
 from poetry.layouts import layout
 from poetry.repositories import Repository
 from poetry.repositories import RepositoryPool
+from poetry.utils.cache import ArtifactCache
 from poetry.utils.env import EnvManager
 from poetry.utils.env import SystemEnv
 from poetry.utils.env import VirtualEnv
@@ -222,6 +223,11 @@ def config(
     return c
 
 
+@pytest.fixture
+def artifact_cache(config: Config) -> ArtifactCache:
+    return ArtifactCache(cache_dir=config.artifacts_cache_directory)
+
+
 @pytest.fixture()
 def config_dir(tmp_path: Path) -> Path:
     path = tmp_path / "config"
@@ -239,7 +245,7 @@ def mock_user_config_dir(mocker: MockerFixture, config_dir: Path) -> None:
 def download_mock(mocker: MockerFixture) -> None:
     # Patch download to not download anything but to just copy from fixtures
     mocker.patch("poetry.utils.helpers.download_file", new=mock_download)
-    mocker.patch("poetry.puzzle.provider.download_file", new=mock_download)
+    mocker.patch("poetry.packages.direct_origin.download_file", new=mock_download)
     mocker.patch("poetry.repositories.http_repository.download_file", new=mock_download)
 
 
